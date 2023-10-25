@@ -19,6 +19,16 @@ class BasicPropositions:
     def __repr__(self):
         return f"A.{self.data}"
 
+# Propositions for which colors comprise the game's answer
+@proposition(E)
+class AnswerPropositions:
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return f"C.{self.data}"
+
 
 # Different classes for propositions are useful because this allows for more dynamic constraint creation
 # for propositions within that class. For example, you can enforce that "at least one" of the propositions
@@ -46,7 +56,33 @@ x = FancyPropositions("x")
 y = FancyPropositions("y")
 z = FancyPropositions("z")
 
+rows = 8
+cols = 4
 board = []
+# Array of dictonaries,
+correct_colors = []
+
+colors = ["r", "o", "y", "g", "b", "p", "w", "b"]
+
+
+def build_correct_answer( *colors):
+
+    for col in range(cols):
+        correct_colors.append({})
+        for color in colors:
+            correct_colors[col][color] = AnswerPropositions(str(col) + color)
+        # The answer has exactly one color for each peg
+        constraint.add_exactly_one(E, *correct_colors[col].values())
+
+    answer_constraint = correct_colors[0][colors[0]]
+    for col in range(1, cols):
+        answer_constraint &= correct_colors[col][colors[col]]
+    # Save which colors make up the correct answer 
+    E.add_constraint(answer_constraint)
+    
+    # The constrain where no 2 answer colors can be the same is omitted
+    # Because every proposition already has its value locked in.
+
 
 # Build an example full theory for your setting and return it.
 #
@@ -64,14 +100,14 @@ def example_theory():
     # for every instance of BasicPropositions, but you want to enforce it for a, b, and c.:
     #constraint.add_exactly_one(E, a, b, c)
 
+    build_correct_answer("r", "w", "g", "p")
+
     # 2d array of dictionaries
     # row#, col#, color key
-    colors = ["r", "o", "y", "g", "b", "p", "w", "b"]
-
     # Build propositions for every color in every peg of the board
-    for row in range(0, 8):
+    for row in range(0, rows):
         board.append([])
-        for col in range(0, 4):
+        for col in range(0, cols):
             board[row].append({})
             for color in colors:
                 board[row][col][color] = BasicPropositions(f"X{row}{col}" + color)
