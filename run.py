@@ -66,7 +66,7 @@ def example_theory():
 
     # 2d array of dictionaries
     # row#, col#, color key
-    colors = ["r", "g", "b", "y", "w", "b"]
+    colors = ["r", "o", "y", "g", "b", "p", "w", "b"]
 
     # Build propositions for every color in every peg of the board
     for row in range(0, 8):
@@ -76,7 +76,7 @@ def example_theory():
             for color in colors:
                 board[row][col][color] = BasicPropositions(f"X{row}{col}" + color)
             # Exactly one color can be present in a peg
-            constraint.add_exactly_one(E, *board[row][col].values())
+            constraint.add_at_most_one(E, *board[row][col].values())
 
     # Define the contents of the first row
     E.add_constraint(board[0][0]["r"] & board[0][1]["w"] & board[0][2]["y"] & board[0][3]["g"])
