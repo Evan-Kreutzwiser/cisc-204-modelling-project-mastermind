@@ -58,8 +58,8 @@ class FancyPropositions:
         return f"A.{self.data}"
  """
 
-rows = 8
-cols = 4
+rows = 3 # 8
+cols = 4 # 4
 board: List[List[Dict]] = []
 # Array of dictonaries, 
 correct_colors: List[Dict] = []
@@ -101,9 +101,10 @@ def build_correct_answer( *answer):
 
     answer_constraint = correct_colors[0][answer[0]]
     for col in range(1, cols):
-        answer_constraint &= correct_colors[col][colors[col]]
+        answer_constraint &= correct_colors[col][answer[col]]
     # Save which colors make up the correct answer 
     E.add_constraint(answer_constraint)
+    print(correct_colors)
 
     print("Correct answer is: " + " ".join(answer))
     
@@ -153,21 +154,36 @@ def example_theory(allow_duplicate_colors=False):
 
     # Generate propositions to provide feedback on whether colors are included in the 
     # answer and and whether they are in the correct position.
-    
     for row in range(0, rows):
         color_in_correct_position.append([])
         color_used_in_answer.append([])
         for col in range(0, cols):
             color_in_correct_position[row].append(GuessFeedbackPropositions(str(row) + str(col), in_correct_position=True))
             color_used_in_answer[row].append(GuessFeedbackPropositions(str(row) + str(col), in_correct_position=False))
-            #E.add_constraint(color_in_correct_position[row][col] | color_used_in_answer[row][col])
 
             # Generate constrains allowing that automatically determine how correct a guess is and provide feedback to the solver
             for color in colors:
                 # Check whether the color in the guess matches the solution
                 E.add_constraint((board[row][col][color] & correct_colors[col][color]) >> color_in_correct_position[row][col])
-                # TODO: Constrains for when color is in the solution but not the correct position
-                # TODO: Check game win conditon (A row has the correct color in every position)
+
+                # Check the case where the color is not in the correct spot but the color is present in the answer
+                other_columns = list(correct_colors)
+                other_columns.pop(col)
+                E.add_constraint((board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns])) >> color_used_in_answer[row][col])
+
+    # Add constraints that guide the solver, making sure it uses the feedback in the next rows
+    for row in range(1, rows): # Skip first row
+        for col in range(0, cols):
+            for color in colors:
+                # Colors in the correct position must be used in that position in the next guess
+                E.add_constraint((board[row-1][col][color] & color_in_correct_position[row][col]) >> board[row][col][color])
+
+                # If a color in the previous answer is used but not in the right spot, it must be used again in a different position next guess
+                other_columns = list(board[row])
+                other_columns.pop(col)
+                print([prop_list[color] for prop_list in other_columns])
+                E.add_constraint((board[row-1][col][color] & color_used_in_answer[row][col]) >> or_all([prop_list[color] for prop_list in other_columns]))
+
 
     # Add the game win condition: a row must have every color in the correct position
     E.add_constraint(and_all(map(or_all, color_in_correct_position)))
