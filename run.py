@@ -104,7 +104,6 @@ def build_correct_answer( *answer):
         answer_constraint &= correct_colors[col][answer[col]]
     # Save which colors make up the correct answer 
     E.add_constraint(answer_constraint)
-    print(correct_colors)
 
     print("Correct answer is: " + " ".join(answer))
     
@@ -181,7 +180,6 @@ def example_theory(allow_duplicate_colors=False):
                 # If a color in the previous answer is used but not in the right spot, it must be used again in a different position next guess
                 other_columns = list(board[row])
                 other_columns.pop(col)
-                print([prop_list[color] for prop_list in other_columns])
                 E.add_constraint((board[row-1][col][color] & color_used_in_answer[row][col]) >> or_all([prop_list[color] for prop_list in other_columns]))
 
 
@@ -203,7 +201,19 @@ if __name__ == "__main__":
     # of your model:
     print("\nSatisfiable: %s" % T.satisfiable())
     print("# Solutions: %d" % count_solutions(T))
-    print("   Solution: %s" % T.solve())
+    solution = T.solve()
+
+    if solution:
+        print("   Solution:")
+        # Print a clean grid of which propositions / colors were selected for each position on the board 
+        for index, row in reversed(list(enumerate(board))):
+            # For each position in the row, get the proposition (not string representation) for that color in that location
+            # If there is nothing in that position, either because the game was solved in an earlier row or there is a 
+            # problem with the logic/solver use a placeholder instead to maintain alignment
+            colors = [[prop for prop in col.values() if solution[prop] == True] or  "[     ]" for col in row]
+            # Adapt format to the number of columns
+            print(("%d:" + " %s"*cols) % (index, *colors))
+
 
     print("\nVariable likelihoods:")
     for row in range(len(board)):
