@@ -102,6 +102,12 @@ def and_all(list):
         result = (result & item) if result else item
     return result
 
+def print_model(model, row_specific_solved_props = False):
+
+    for row in range(len(board)):
+        print(("%d: " + "%s "*cols) % (row, *[[prop for prop in col.values() if model[prop] == True] or  "[     ]" for col in board[row]]))
+    print("Solved" if (not row_specific_solved_props) and model[game_solved] else "Not solved")
+
 # Define the game's answer as logic
 # This can also be called without arguments to regenerate the constrains 
 # without overriding the answer for the line-by-line solver, since it
@@ -223,6 +229,7 @@ def solve_all_at_once(allow_duplicate_colors=False):
 # Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
 # model is the result of T.solve() on the previous row
 def guess_next_row(current_row, model) -> NNF:
+    global E
 
     # Need to reuse encoding object, but purging everything might cause problems
     # with the class definitions. Avoid using contraints on class definitions
@@ -241,6 +248,22 @@ def guess_next_row(current_row, model) -> NNF:
         constraint.add_exactly_one(E, *board[current_row][col].values())
 
     # Carry over the board's state from solving the previous row
+    
+    '''
+    column_correctness_checks = []
+    for col in range(cols):
+        individual_color_checks = []
+        for color in colors:
+            s = SolvedProposition(str(col) + color)
+            individual_color_checks.append(s)
+            E.add_constraint((board[current_row][col][color] & correct_color_props[col][color]) >> s)
+        s = SolvedProposition(str(col))
+        column_correctness_checks.append(s)
+        E.add_constraint(or_all(individual_color_checks) >> s)
+
+    E.add_constraint(and_all(column_correctness_checks) >> game_solved)
+    '''
+
     if (model):
         E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
 
@@ -251,7 +274,12 @@ def guess_next_row(current_row, model) -> NNF:
             individual_color_checks.append(board[current_row][col][color] & correct_color_props[col][color])
         column_correctness_checks.append(or_all(individual_color_checks))
 
-    E.add_constraint(and_all(column_correctness_checks) >> game_solved)
+    #if (current_row > 3):
+    #    E.add_constraint(game_solved)
+    #else:
+    #    E.add_constraint(~game_solved)
+
+    E.add_constraint(game_solved >> and_all(column_correctness_checks))
 
     for row in range(len(board)):
         for col in range(cols):
@@ -264,7 +292,7 @@ def guess_next_row(current_row, model) -> NNF:
                 E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> board[current_row][col][color])
 
                 # If the color was used but is in the wrong position, it MUST be used in a DIFFERENT position
-                color_in_answer = or_all([print(color_props) or color_props[color] for color_props in other_columns_in_answer])
+                color_in_answer = or_all([color_props[color] for color_props in other_columns_in_answer])
                 use_color_in_guess = and_all([color_props[color] for color_props in other_columns])
                 E.add_constraint((board[row][col][color] & color_in_answer) >> (use_color_in_guess & ~board[current_row][col][color]))
 
@@ -290,12 +318,12 @@ if __name__ == "__main__":
     while True:
         T = guess_next_row(row, solution)
         T = T.compile()
-        
+
         print("\nSatisfiable: %s" % T.satisfiable())
         print("# Solutions: %d" % count_solutions(T))
         
         solution = T.solve()
-        print(solution)
+        print_model(solution)
         if solution[game_solved] == True:
             break
         
