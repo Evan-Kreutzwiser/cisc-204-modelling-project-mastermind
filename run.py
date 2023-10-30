@@ -4,7 +4,7 @@ from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
 
 # These two lines make sure a faster SAT solver is used.
-from nnf import config
+from nnf import NNF, config
 config.sat_backend = "kissat"
 
 # Encoding that will store all of your constraints
@@ -42,6 +42,17 @@ class AnswerPropositions:
     def __repr__(self):
         return f"C.{self.data}"
 
+# Whether the game was solved. Optionally pass data as a 
+# row indicator for which row the game was solved on 
+@proposition(E)
+class SolvedProposition:
+
+    def __init__(self, data = None):
+        self.data = data
+
+    def __repr__(self) -> str:
+        return f"S.{self.data}" if self.data else "S"
+
 # Different classes for propositions are useful because this allows for more dynamic constraint creation
 # for propositions within that class. For example, you can enforce that "at least one" of the propositions
 # that are instances of this class must be true by using a @constraint decorator.
@@ -62,13 +73,15 @@ rows = 3 # 8
 cols = 4 # 4
 board: List[List[Dict]] = []
 # Array of dictonaries, 
-correct_colors: List[Dict] = []
+correct_color_props: List[Dict] = []
 
 # 2 dimensional arrays representing whether a given peg matches the corresponsing position in the answer
 # And whether a color is in the wrong positoin but present in the answer.
 color_in_correct_position: List[List] = []
 color_used_in_answer: List[List] = []
+game_solved = SolvedProposition()
 
+answer = None # Utility used to preserve the answer inbetween encoding resets
 colors = ["r", "o", "y", "g", "b", "p", "w", "b"]
 
 # Create a disjunction of every element in the input list
@@ -89,23 +102,37 @@ def and_all(list):
         result = (result & item) if result else item
     return result
 
+# Define the game's answer as logic
+# This can also be called without arguments to regenerate the constrains 
+# without overriding the answer for the line-by-line solver, since it
+# clobbers the constraints each iteration
+def build_correct_answer( *answer_colors):
+    # Global variables can be accessed by default, but write access requires
+    # explicitly naming the globals we wish to modify
+    global answer 
+    global correct_color_props
 
-def build_correct_answer( *answer):
+    if len(answer_colors) > 0:
+        answer = answer_colors
 
+        # Only rebuild the answer propositions when the answer changes
+        correct_color_props = []
+        for col in range(cols):
+            correct_color_props.append({})
+            for color in colors:
+                correct_color_props[col][color] = AnswerPropositions(str(col) + color)
+    
+    # The answer has exactly one color for each peg
     for col in range(cols):
-        correct_colors.append({})
-        for color in colors:
-            correct_colors[col][color] = AnswerPropositions(str(col) + color)
-        # The answer has exactly one color for each peg
-        constraint.add_exactly_one(E, *correct_colors[col].values())
+        constraint.add_exactly_one(E, *correct_color_props[col].values())
 
-    answer_constraint = correct_colors[0][answer[0]]
+    answer_constraint = correct_color_props[0][answer[0]]
     for col in range(1, cols):
-        answer_constraint &= correct_colors[col][answer[col]]
+        answer_constraint &= correct_color_props[col][answer[col]]
     # Save which colors make up the correct answer 
     E.add_constraint(answer_constraint)
 
-    print("Correct answer is: " + " ".join(answer))
+    #print("Correct answer is: " + " ".join(answer))
     
     # The constrain where no 2 answer colors can be the same is omitted
     # Because every proposition already has its value locked in.
@@ -118,7 +145,7 @@ def build_correct_answer( *answer):
 #  what the expectations are.
 #
 # allow_duplicate_colors allows reducing the problem space and adds another controllable factor for analyzing the model
-def example_theory(allow_duplicate_colors=False):
+def solve_all_at_once(allow_duplicate_colors=False):
     # Add custom constraints by creating formulas with the variables you created. 
     #E.add_constraint((a | b) & ~x)
     # Implication
@@ -163,10 +190,10 @@ def example_theory(allow_duplicate_colors=False):
             # Generate constrains allowing that automatically determine how correct a guess is and provide feedback to the solver
             for color in colors:
                 # Check whether the color in the guess matches the solution
-                E.add_constraint((board[row][col][color] & correct_colors[col][color]) >> color_in_correct_position[row][col])
+                E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> color_in_correct_position[row][col])
 
                 # Check the case where the color is not in the correct spot but the color is present in the answer
-                other_columns = list(correct_colors)
+                other_columns = list(correct_color_props)
                 other_columns.pop(col)
                 E.add_constraint((board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns])) >> color_used_in_answer[row][col])
 
@@ -189,12 +216,95 @@ def example_theory(allow_duplicate_colors=False):
     # Define the contents of the first row
     E.add_constraint(board[0][0]["r"] & board[0][1]["w"] & board[0][2]["y"] & board[0][3]["g"])
 
+    E.add_constraint(and_all(color_in_correct_position[row]) >> game_solved)
+
+    return E
+
+# Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
+# model is the result of T.solve() on the previous row
+def guess_next_row(current_row, model) -> NNF:
+
+    # Need to reuse encoding object, but purging everything might cause problems
+    # with the class definitions. Avoid using contraints on class definitions
+    E.clear_constraints()
+
+    # Regenerate the answer constrains using the previously set answer, since we clobbered them just now 
+    build_correct_answer()
+
+    # Add a new row each iteration
+    board.append([])
+    for col in range(cols):
+        board[current_row].append({})
+        for color in colors:
+            board[current_row][col][color] = BasicPropositions(f"{current_row}{col}{color}")
+        # Only one color can be present in a peg, and the solver must guess a color for each column
+        constraint.add_exactly_one(E, *board[current_row][col].values())
+
+    # Carry over the board's state from solving the previous row
+    if (model):
+        E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
+
+    column_correctness_checks = []
+    for col in range(cols):
+        individual_color_checks = []
+        for color in colors:
+            individual_color_checks.append(board[current_row][col][color] & correct_color_props[col][color])
+        column_correctness_checks.append(or_all(individual_color_checks))
+
+    E.add_constraint(and_all(column_correctness_checks) >> game_solved)
+
+    for row in range(len(board)):
+        for col in range(cols):
+            other_columns = list(board[row])
+            other_columns.pop(col)
+            other_columns_in_answer = list(correct_color_props) # Wrapped in list so that poppign doesn't delete an answer column
+            other_columns_in_answer.pop(col)
+            for color in colors:
+                # If any color is in the correct position, it MUST be used in that position in the next guess
+                E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> board[current_row][col][color])
+
+                # If the color was used but is in the wrong position, it MUST be used in a DIFFERENT position
+                color_in_answer = or_all([print(color_props) or color_props[color] for color_props in other_columns_in_answer])
+                use_color_in_guess = and_all([color_props[color] for color_props in other_columns])
+                E.add_constraint((board[row][col][color] & color_in_answer) >> (use_color_in_guess & ~board[current_row][col][color]))
+
+    # Prevent a guess from containing multiple pegs of the same color
+    for color in colors:
+        all_of_color_in_row = []
+        for col in range(cols):
+            all_of_color_in_row.append(board[current_row][col][color])
+        constraint.add_at_most_one(E, *all_of_color_in_row)
+    
     return E
 
 
 if __name__ == "__main__":
 
-    T = example_theory()
+    solution = None
+    
+    # Green, White, Yellow, Red
+    build_correct_answer("g", "w", "y", "r")
+
+    row = 0
+    # Play the game on an infinite number of rows until the solution is found
+    while True:
+        T = guess_next_row(row, solution)
+        T = T.compile()
+        
+        print("\nSatisfiable: %s" % T.satisfiable())
+        print("# Solutions: %d" % count_solutions(T))
+        
+        solution = T.solve()
+        print(solution)
+        if solution[game_solved] == True:
+            break
+        
+        row += 1
+
+    print("Game solved")
+    print(board)
+    '''
+    T = solve_all_at_once()
     # Don't compile until you're finished adding all your constraints!
     T = T.compile()
     # After compilation (and only after), you can check some of the properties
@@ -202,6 +312,7 @@ if __name__ == "__main__":
     print("\nSatisfiable: %s" % T.satisfiable())
     print("# Solutions: %d" % count_solutions(T))
     solution = T.solve()
+    '''
 
     if solution:
         print("   Solution:")
