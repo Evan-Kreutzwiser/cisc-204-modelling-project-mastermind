@@ -82,7 +82,7 @@ color_used_in_answer: List[List] = []
 game_solved = SolvedProposition()
 
 answer = None # Utility used to preserve the answer inbetween encoding resets
-colors = ["r", "o", "y", "g", "b", "p", "w", "b"]
+colors = ["r", "o", "y", "g", "b", "p", "w", "s"]
 
 # Create a disjunction of every element in the input list
 def or_all(list):
@@ -102,7 +102,16 @@ def and_all(list):
         result = (result & item) if result else item
     return result
 
+def if_and_only_if(a, b):
+    return (a & b) | (~a & ~b)
+
+
 def print_model(model, row_specific_solved_props = False):
+
+    if (model is None):
+        print("No solution found")
+        print()
+        return
 
     for row in range(len(board)-1, -1, -1):
         print(("%d: " + "%s "*cols) % (row, *[[prop for prop in col.values() if model[prop] == True] or  "[     ]" for col in board[row]]))
@@ -205,12 +214,14 @@ def solve_all_at_once(allow_duplicate_colors=False):
             # Generate constrains allowing that automatically determine how correct a guess is and provide feedback to the solver
             for color in colors:
                 # Check whether the color in the guess matches the solution
-                E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> color_in_correct_position[row][col])
+                #E.add_constraint(if_and_only_if(board[row][col][color] & correct_color_props[col][color], color_in_correct_position[row][col]))
 
                 # Check the case where the color is not in the correct spot but the color is present in the answer
                 other_columns = list(correct_color_props)
                 other_columns.pop(col)
-                E.add_constraint((board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns])) >> color_used_in_answer[row][col])
+                #E.add_constraint(if_and_only_if(board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns]), color_used_in_answer[row][col]))
+
+        E.add_constraint(if_and_only_if(and_all(color_in_correct_position[row]), game_solved))
 
     # Add constraints that guide the solver, making sure it uses the feedback in the next rows
     for row in range(1, rows): # Skip first row
@@ -226,18 +237,16 @@ def solve_all_at_once(allow_duplicate_colors=False):
 
 
     # Add the game win condition: a row must have every color in the correct position
-    E.add_constraint(and_all(map(or_all, color_in_correct_position)))
+    E.add_constraint(game_solved)
 
     # Define the contents of the first row
     E.add_constraint(board[0][0]["r"] & board[0][1]["w"] & board[0][2]["y"] & board[0][3]["g"])
-
-    E.add_constraint(and_all(color_in_correct_position[row]) >> game_solved)
 
     return E
 
 # Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
 # model is the result of T.solve() on the previous row
-def guess_next_row(current_row, model) -> NNF:
+def guess_next_row(current_row, model) -> Encoding:
     global E
 
     # Need to reuse encoding object, but purging everything might cause problems
@@ -265,21 +274,21 @@ def guess_next_row(current_row, model) -> NNF:
     if (model):
         E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
 
-
-    for row in range(len(board)):
+    for row in range(len(board)-1):
         for col in range(cols):
             other_columns = list(board[row])
             other_columns.pop(col)
-            other_columns_in_answer = list(correct_color_props) # Wrapped in list so that poppign doesn't delete an answer column
+            other_columns_in_answer = list(correct_color_props) # Wrapped in list so that popping doesn't delete an answer column
             other_columns_in_answer.pop(col)
             for color in colors:
                 # If any color is in the correct position, it MUST be used in that position in the next guess
+                #print(f"{row}: {board[row][col][color]} & {correct_color_props[col][color]}) >> {board[current_row][col][color]}")
                 E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> board[current_row][col][color])
 
                 # If the color was used but is in the wrong position, it MUST be used in a DIFFERENT position
                 color_in_answer_other_column = or_all([color_props[color] for color_props in other_columns_in_answer])
-                use_color_elsewhere_in_guess = and_all([color_props[color] for color_props in other_columns])
-                E.add_constraint((board[row][col][color] & color_in_answer_other_column) >> (use_color_elsewhere_in_guess & ~board[current_row][col][color]))
+                use_color_elsewhere_in_guess = or_all([color_props[color] for color_props in other_columns])
+                E.add_constraint((board[row][col][color] & color_in_answer_other_column) >>  ~board[current_row][col][color]) #(use_color_elsewhere_in_guess))
 
 
     for row in range(len(board)-1):
@@ -289,6 +298,7 @@ def guess_next_row(current_row, model) -> NNF:
                 dont_use_color_in_guess = ~or_all([column[color] for column in board[current_row]])
                 # If the color isn't in the answer at all, don't use it again anywere
                 E.add_constraint((board[row][col][color] & ~color_in_answer) >> dont_use_color_in_guess)
+                #E.add_constraint(if_and_only_if(board[row][col][color] & ~color_in_answer, dont_use_color_in_guess))
 
 
     # Prevent a guess from containing multiple pegs of the same color
@@ -306,13 +316,15 @@ if __name__ == "__main__":
     solution = None
     
     # Green, White, Yellow, Red
-    build_correct_answer("g", "w", "y", "r")
+    build_correct_answer("s", "g", "y", "o")
 
     row = 0
     # Play the game on an infinite number of rows until the solution is found
     while True:
         T = guess_next_row(row, solution)
         T = T.compile()
+        assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
+        assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
 
         print("\nSatisfiable: %s" % T.satisfiable())
         print("# Solutions: %d" % count_solutions(T))
@@ -333,6 +345,8 @@ if __name__ == "__main__":
     #print("Game solved")
     #print(board)
     '''
+
+    
     T = solve_all_at_once()
     # Don't compile until you're finished adding all your constraints!
     T = T.compile()
@@ -342,21 +356,13 @@ if __name__ == "__main__":
     print("# Solutions: %d" % count_solutions(T))
     solution = T.solve()
     '''
-
     if solution:
         print("   Solution:")
         # Print a clean grid of which propositions / colors were selected for each position on the board 
-        for index, row in reversed(list(enumerate(board))):
-            # For each position in the row, get the proposition (not string representation) for that color in that location
-            # If there is nothing in that position, either because the game was solved in an earlier row or there is a 
-            # problem with the logic/solver use a placeholder instead to maintain alignment
-            colors = [[prop for prop in col.values() if solution[prop] == True] or  "[     ]" for col in row]
-            # Adapt format to the number of columns
-            print(("%d:" + " %s"*cols) % (index, *colors))
+        #print_model(solution)
 
-
-    print("\nVariable likelihoods:")
-    for row in range(len(board)):
+        row = -1
+        print("\nVariable likelihoods: ")
         for col in range(len(board[row])):
             for p in board[row][col].values():
                 # Ensure that you only send these functions NNF formulas
