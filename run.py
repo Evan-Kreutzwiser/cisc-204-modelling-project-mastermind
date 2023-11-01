@@ -276,7 +276,7 @@ def guess_next_row(current_row, model) -> Encoding:
 
     for row in range(len(board)-1):
         for col in range(cols):
-            other_columns = list(board[row])
+            other_columns = list(board[current_row])
             other_columns.pop(col)
             other_columns_in_answer = list(correct_color_props) # Wrapped in list so that popping doesn't delete an answer column
             other_columns_in_answer.pop(col)
@@ -288,7 +288,10 @@ def guess_next_row(current_row, model) -> Encoding:
                 # If the color was used but is in the wrong position, it MUST be used in a DIFFERENT position
                 color_in_answer_other_column = or_all([color_props[color] for color_props in other_columns_in_answer])
                 use_color_elsewhere_in_guess = or_all([color_props[color] for color_props in other_columns])
-                E.add_constraint((board[row][col][color] & color_in_answer_other_column) >>  ~board[current_row][col][color]) #(use_color_elsewhere_in_guess))
+                E.add_constraint(~(board[row][col][color] & color_in_answer_other_column) | (use_color_elsewhere_in_guess))
+                # This line, which is semantically equivalent, caused the solver to claim there were 0 solutions.
+                # With the line above, it works correctly
+                # E.add_constraint((board[row][col][color] & color_in_answer_other_column) >> (use_color_elsewhere_in_guess))
 
 
     for row in range(len(board)-1):
@@ -356,7 +359,7 @@ if __name__ == "__main__":
     print("# Solutions: %d" % count_solutions(T))
     solution = T.solve()
     '''
-    if solution:
+    if solution and False:
         print("   Solution:")
         # Print a clean grid of which propositions / colors were selected for each position on the board 
         #print_model(solution)
