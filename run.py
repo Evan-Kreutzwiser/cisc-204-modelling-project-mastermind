@@ -1,4 +1,5 @@
 
+# For a complete module reference, see https://bauhaus.readthedocs.io/en/latest/bauhaus.html
 from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
@@ -52,22 +53,6 @@ class SolvedProposition:
 
     def __repr__(self) -> str:
         return f"S.{self.data}" if self.data else "S"
-
-# Different classes for propositions are useful because this allows for more dynamic constraint creation
-# for propositions within that class. For example, you can enforce that "at least one" of the propositions
-# that are instances of this class must be true by using a @constraint decorator.
-# other options include: at most one, exactly one, at most k, and implies all.
-# For a complete module reference, see https://bauhaus.readthedocs.io/en/latest/bauhaus.html
-""" @constraint.at_least_one(E)
-@proposition(E)
-class FancyPropositions:
-
-    def __init__(self, data):
-        self.data = data
-
-    def __repr__(self):
-        return f"A.{self.data}"
- """
 
 rows = 3 # 8
 cols = 4 # 4
@@ -137,6 +122,7 @@ def build_correct_answer( *answer_colors):
     global correct_color_props
 
     if len(answer_colors) > 0:
+        print("Correct answer is: " + " ".join(answer_colors) + "\n")
         answer = answer_colors
 
         # Only rebuild the answer propositions when the answer changes
@@ -155,8 +141,6 @@ def build_correct_answer( *answer_colors):
         answer_constraint &= correct_color_props[col][answer[col]]
     # Save which colors make up the correct answer 
     E.add_constraint(answer_constraint)
-
-    #print("Correct answer is: " + " ".join(answer))
     
     # The constrain where no 2 answer colors can be the same is omitted
     # Because every proposition already has its value locked in.
@@ -170,16 +154,6 @@ def build_correct_answer( *answer_colors):
 #
 # allow_duplicate_colors allows reducing the problem space and adds another controllable factor for analyzing the model
 def solve_all_at_once(allow_duplicate_colors=False):
-    # Add custom constraints by creating formulas with the variables you created. 
-    #E.add_constraint((a | b) & ~x)
-    # Implication
-    #E.add_constraint(y >> z)
-    # Negate a formula
-    #E.add_constraint(~(x & y))
-    # You can also add more customized "fancy" constraints. Use case: you don't want to enforce "exactly one"
-    # for every instance of BasicPropositions, but you want to enforce it for a, b, and c.:
-    #constraint.add_exactly_one(E, a, b, c)
-
     build_correct_answer("r", "w", "g", "p")
 
     # 2d array of dictionaries
@@ -214,12 +188,12 @@ def solve_all_at_once(allow_duplicate_colors=False):
             # Generate constrains allowing that automatically determine how correct a guess is and provide feedback to the solver
             for color in colors:
                 # Check whether the color in the guess matches the solution
-                #E.add_constraint(if_and_only_if(board[row][col][color] & correct_color_props[col][color], color_in_correct_position[row][col]))
+                E.add_constraint(if_and_only_if(board[row][col][color] & correct_color_props[col][color], color_in_correct_position[row][col]))
 
                 # Check the case where the color is not in the correct spot but the color is present in the answer
                 other_columns = list(correct_color_props)
                 other_columns.pop(col)
-                #E.add_constraint(if_and_only_if(board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns]), color_used_in_answer[row][col]))
+                E.add_constraint(if_and_only_if(board[row][col][color] & or_all([prop_list[color] for prop_list in other_columns]), color_used_in_answer[row][col]))
 
         E.add_constraint(if_and_only_if(and_all(color_in_correct_position[row]), game_solved))
 
@@ -246,9 +220,7 @@ def solve_all_at_once(allow_duplicate_colors=False):
 
 # Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
 # model is the result of T.solve() on the previous row
-def guess_next_row(current_row, model) -> Encoding:
-    global E
-
+def guess_next_row(current_row: int, model: Dict) -> Encoding:
     # Need to reuse encoding object, but purging everything might cause problems
     # with the class definitions. Avoid using contraints on class definitions
     E.clear_constraints()
@@ -282,7 +254,6 @@ def guess_next_row(current_row, model) -> Encoding:
             other_columns_in_answer.pop(col)
             for color in colors:
                 # If any color is in the correct position, it MUST be used in that position in the next guess
-                #print(f"{row}: {board[row][col][color]} & {correct_color_props[col][color]}) >> {board[current_row][col][color]}")
                 E.add_constraint((board[row][col][color] & correct_color_props[col][color]) >> board[current_row][col][color])
 
                 # If the color was used but is in the wrong position, it MUST be used in a DIFFERENT position
@@ -318,7 +289,7 @@ if __name__ == "__main__":
 
     solution = None
     
-    # Green, White, Yellow, Red
+    # Silver, Green, Yellow, Orange
     build_correct_answer("s", "g", "y", "o")
 
     row = 0
@@ -329,11 +300,11 @@ if __name__ == "__main__":
         assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
         assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
 
-        print("\nSatisfiable: %s" % T.satisfiable())
-        print("# Solutions: %d" % count_solutions(T))
+        #print("\nSatisfiable: %s" % T.satisfiable())
+        #print("# Solutions: %d" % count_solutions(T))
         
         solution = T.solve()
-        print_model(solution)
+        #print_model(solution)
 
         game_finished = True
         for col in range(cols):
@@ -345,11 +316,8 @@ if __name__ == "__main__":
         
         row += 1
 
-    #print("Game solved")
-    #print(board)
-    '''
 
-    
+    '''
     T = solve_all_at_once()
     # Don't compile until you're finished adding all your constraints!
     T = T.compile()
@@ -359,16 +327,17 @@ if __name__ == "__main__":
     print("# Solutions: %d" % count_solutions(T))
     solution = T.solve()
     '''
-    if solution and False:
-        print("   Solution:")
+    if solution:
+        print("Solution:")
         # Print a clean grid of which propositions / colors were selected for each position on the board 
-        #print_model(solution)
-
-        row = -1
+        print_model(solution)
+    '''
         print("\nVariable likelihoods: ")
-        for col in range(len(board[row])):
-            for p in board[row][col].values():
-                # Ensure that you only send these functions NNF formulas
-                # Literals are compiled to NNF here
-                print(" %s: %.2f" % (p, likelihood(T, p)))
+        for row in range(len(board)):
+            for col in range(cols):
+                for p in board[row][col].values():
+                    # Ensure that you only send these functions NNF formulas
+                    # Literals are compiled to NNF here
+                    print(" %s: %.2f" % (p, likelihood(T, p)))
     print()
+    '''
