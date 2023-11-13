@@ -107,9 +107,8 @@ def print_model(model, row_specific_solved_props = False):
         correct_prop = board[-1][col][answer[col]]
         if model[correct_prop] == False:
             game_finished = False
-
         
-    print("Solved" if (not row_specific_solved_props) and game_finished else "Not solved")
+    #print("Solved" if (not row_specific_solved_props) and game_finished else "Not solved")
     print()
 
 
@@ -138,7 +137,7 @@ def set_answer(*answer_colors):
         answer = []
         for _ in range(cols):
             # Take a random color and prevent it from being reused
-            color = available_colors.pop(random.randint(0, len(available_colors)))
+            color = available_colors.pop(random.randint(0, len(available_colors)-1)) # randint includes ends of range, unlike the builting range()
             answer.append(color)
 
     correct_color_props = []
@@ -175,7 +174,8 @@ def build_correct_answer_constraints():
 #
 # allow_duplicate_colors allows reducing the problem space and adds another controllable factor for analyzing the model
 def solve_all_at_once(allow_duplicate_colors=False):
-    build_correct_answer_constraints("r", "w", "g", "p")
+    set_answer("r", "w", "g", "p")
+    build_correct_answer_constraints()
 
     # 2d array of dictionaries
     # row#, col#, color key
@@ -238,6 +238,41 @@ def solve_all_at_once(allow_duplicate_colors=False):
     E.add_constraint(board[0][0]["r"] & board[0][1]["w"] & board[0][2]["y"] & board[0][3]["g"])
 
     return E
+
+# Find the game's solution by playing it, making guesses one row at a time based 
+# on information from the previous guesses
+def solve_by_playing():
+    
+    row = 0
+    solution = None
+    # Play the game on an infinite number of rows until the solution is found
+    while True:
+        # Make a guess for this turn
+        T = guess_next_row(row, solution)
+        T = T.compile()
+  
+        # Check for problems with the model
+        if T.valid():
+            raise "Theory is valid - every model is true. Something is wrong with the constraints"  
+        if T.negate().valid():
+            raise "Theory has no solutions. Something is wrong with the constraints"
+        
+        solution = T.solve()
+        number_of_solutions = count_solutions(T)
+        #print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
+
+        game_finished = True
+        for col in range(cols):
+            correct_prop = board[row][col][answer[col]]
+            if solution[correct_prop] == False:
+                game_finished = False
+        if game_finished:
+            break
+        
+        row += 1
+
+    return solution
+
 
 # Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
 # model is the result of T.solve() on the previous row
@@ -314,32 +349,7 @@ if __name__ == "__main__":
     # Generate a random solution for the game
     set_answer()
 
-
-    row = 0
-    solution = None
-    # Play the game on an infinite number of rows until the solution is found
-    while True:
-        T = guess_next_row(row, solution)
-        T = T.compile()
-        assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
-        assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
-
-        #print("\nSatisfiable: %s" % T.satisfiable())
-        #print("# Solutions: %d" % count_solutions(T))
-        
-        solution = T.solve()
-        #print_model(solution)
-
-        game_finished = True
-        for col in range(cols):
-            correct_prop = board[row][col][answer[col]]
-            if solution[correct_prop] == False:
-                game_finished = False
-        if game_finished:
-            break
-        
-        row += 1
-
+    solution = solve_by_playing()
 
     '''
     T = solve_all_at_once()
