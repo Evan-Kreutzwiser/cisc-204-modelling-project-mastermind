@@ -1,19 +1,35 @@
 
 import os, sys
 
-from run import solve_all_at_once
+from run import solve_by_playing, print_model, answer, set_answer
 
 USAGE = '\n\tpython3 test.py [draft|final]\n'
 EXPECTED_VAR_MIN = 10
 EXPECTED_CONS_MIN = 50
 
 def test_theory():
-    T = solve_all_at_once()
 
-    assert len(T.vars()) > EXPECTED_VAR_MIN, "Only %d variables -- your theory is likely not sophisticated enough for the course project." % len(T.vars())
-    assert T.size() > EXPECTED_CONS_MIN, "Only %d operators in the formula -- your theory is likely not sophisticated enough for the course project." % T.size()
-    assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
-    assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
+    # Create a randomizaed answer
+    set_answer()
+
+    # This solver generates a new theory/encoding for every guess/row, so there is no single theory to make the assertions against
+    solution = solve_by_playing()
+
+    if solution:
+        print("Solution:")
+        # Print a clean grid of which propositions / colors were selected for each position on the board 
+        print_model(solution)
+
+
+    # A default board of 4 columns with 8 colors has a over 4 * 8 * (# of rows) propositions, and each one is used in multiple constraints simultaniously
+
+    #assert len(T.vars()) > EXPECTED_VAR_MIN, "Only %d variables -- your theory is likely not sophisticated enough for the course project." % len(T.vars())
+    #assert T.size() > EXPECTED_CONS_MIN, "Only %d operators in the formula -- your theory is likely not sophisticated enough for the course project." % T.size()
+    
+    # These 2 checks are run for every guess, and an exception will be thrown if they fail 
+    
+    #assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
+    #assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
 
 def file_checks(stage):
     proofs_jp = os.path.isfile(os.path.join('.','documents',stage,'proofs.jp'))

@@ -243,6 +243,9 @@ def solve_all_at_once(allow_duplicate_colors=False):
 # on information from the previous guesses
 def solve_by_playing():
     
+    if not answer or len(answer) != cols:
+        raise ValueError('Answer not defined! Call set_answer() to generate a randomized answer, or set an answer manually, e.g. set_answer("r", "y", "g", "b")')
+
     row = 0
     solution = None
     # Play the game on an infinite number of rows until the solution is found
