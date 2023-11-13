@@ -251,19 +251,30 @@ def solve_by_playing():
     # Play the game on an infinite number of rows until the solution is found
     while True:
         # Make a guess for this turn
+        # The solution from the previous iteration describes the state of the board this state carries through between the guesses.
+        # The solver makes use of that data to make an educated guess for the next row, repeating until its guess matches the answer,
+        # effectively playing the game similarly to how a human would 
         T = guess_next_row(row, solution)
         T = T.compile()
   
         # Check for problems with the model
         if T.valid():
-            raise "Theory is valid - every model is true. Something is wrong with the constraints"  
+            raise RuntimeError("Theory is valid - every model is true. Something is wrong with the constraints")  
         if T.negate().valid():
-            raise "Theory has no solutions. Something is wrong with the constraints"
+            raise RuntimeError("Theory has no solutions. Something is wrong with the constraints")
         
+        # The SAT solver randomly picks a valid model, which represents an intelligent guess that correctly 
+        # uses the information from previous guesses
         solution = T.solve()
         number_of_solutions = count_solutions(T)
         #print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
 
+        # If the solver's guess matches the correct answer, the game is complete.
+        # This had to be moved from logic to python because the solver would work backwards
+        # from the game_finished proposition being true and immediately guess the first answer.
+        # Even though the correct answer is still used in the feedback white/red peg constrainsts
+        # to guide its guesses, this change was enough to make the solving logic blind to the 
+        # answer and actually guess randomly.
         game_finished = True
         for col in range(cols):
             correct_prop = board[row][col][answer[col]]
@@ -306,6 +317,12 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
     if (model):
         E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
 
+    # Add constraints to intelligently guide the model's guesses, taking into account game rules and feedback from previous guesses.
+
+
+    # Feedback from previous guesses mimicking the behavior of white and red pegs in a mastermind game,
+    # making sure that colors known to be in the correct spot are used in that spot again, and forcing 
+    # colors that are in the answer but not the correct spot to be used again but in a different collumn
     for row in range(len(board)-1):
         for col in range(cols):
             other_columns = list(board[current_row])
@@ -324,7 +341,7 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
                 # With the line above, it works correctly
                 # E.add_constraint((board[row][col][color] & color_in_answer_other_column) >> (use_color_elsewhere_in_guess))
 
-
+    # Feedback from previous guesses ensuring that colors known to not be included in the solution from being used again
     for row in range(len(board)-1):
         for col in range(cols):
             for color in colors:
