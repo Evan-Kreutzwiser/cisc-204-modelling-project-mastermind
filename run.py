@@ -3,6 +3,7 @@
 from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
+import random
 
 # These two lines make sure a faster SAT solver is used.
 from nnf import NNF, config
@@ -66,7 +67,7 @@ color_in_correct_position: List[List] = []
 color_used_in_answer: List[List] = []
 game_solved = SolvedProposition()
 
-answer = None # Utility used to preserve the answer inbetween encoding resets
+answer = [] # Utility used to preserve the answer inbetween encoding resets
 colors = ["r", "o", "y", "g", "b", "p", "w", "s"]
 
 # Create a disjunction of every element in the input list
@@ -111,26 +112,46 @@ def print_model(model, row_specific_solved_props = False):
     print("Solved" if (not row_specific_solved_props) and game_finished else "Not solved")
     print()
 
+
 # Define the game's answer as logic
-# This can also be called without arguments to regenerate the constrains 
-# without overriding the answer for the line-by-line solver, since it
-# clobbers the constraints each iteration
-def build_correct_answer( *answer_colors):
+def set_answer(*answer_colors):
     # Global variables can be accessed by default, but write access requires
     # explicitly naming the globals we wish to modify
     global answer 
     global correct_color_props
 
+    # The answer must be made from the 8 defined colors
+    if not all(color in colors for color in answer_colors):
+        raise ValueError(f"Some colors provided for the answer are not valid: {[color for color in answer_colors if color not in colors]}")
+
+    # Use a caller-provided answer for the game
     if len(answer_colors) > 0:
+        if len(answer_colors) != cols:
+            raise ValueError("Number of colors in answer does not match board columns")
+
         print("Correct answer is: " + " ".join(answer_colors) + "\n")
         answer = answer_colors
+    
+    # Randomly generate an answer
+    else:
+        available_colors = list(colors)
+        answer = []
+        for _ in range(cols):
+            # Take a random color and prevent it from being reused
+            color = available_colors.pop(random.randint(0, len(available_colors)))
+            answer.append(color)
 
-        # Only rebuild the answer propositions when the answer changes
-        correct_color_props = []
-        for col in range(cols):
-            correct_color_props.append({})
-            for color in colors:
-                correct_color_props[col][color] = AnswerPropositions(str(col) + color)
+    correct_color_props = []
+    for col in range(cols):
+        correct_color_props.append({})
+        for color in colors:
+            correct_color_props[col][color] = AnswerPropositions(str(col) + color)
+
+
+# Generate constraints to make the game's answer a fixed value.
+# Must be called every row for the line by line solver, 
+# since constraints are clobbered each iteration
+def build_correct_answer_constraints():
     
     # The answer has exactly one color for each peg
     for col in range(cols):
@@ -154,7 +175,7 @@ def build_correct_answer( *answer_colors):
 #
 # allow_duplicate_colors allows reducing the problem space and adds another controllable factor for analyzing the model
 def solve_all_at_once(allow_duplicate_colors=False):
-    build_correct_answer("r", "w", "g", "p")
+    build_correct_answer_constraints("r", "w", "g", "p")
 
     # 2d array of dictionaries
     # row#, col#, color key
@@ -224,9 +245,10 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
     # Need to reuse encoding object, but purging everything might cause problems
     # with the class definitions. Avoid using contraints on class definitions
     E.clear_constraints()
+    E._custom_constraints.clear()
 
     # Regenerate the answer constrains using the previously set answer, since we clobbered them just now 
-    build_correct_answer()
+    build_correct_answer_constraints()
 
     # Add a new row each iteration
     board.append([])
@@ -286,13 +308,15 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
 
 
 if __name__ == "__main__":
-
-    solution = None
+    # Make the solution Silver, Green, Yellow, Orange
+    #set_answer("s", "g", "y", "o")
     
-    # Silver, Green, Yellow, Orange
-    build_correct_answer("s", "g", "y", "o")
+    # Generate a random solution for the game
+    set_answer()
+
 
     row = 0
+    solution = None
     # Play the game on an infinite number of rows until the solution is found
     while True:
         T = guess_next_row(row, solution)
