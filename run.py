@@ -56,19 +56,29 @@ class SolvedProposition:
     def __repr__(self) -> str:
         return f"S.{self.data}" if self.data else "S"
 
-rows = 3 # 8
-cols = 4 # 4
+# Board dimensions
+rows = 8
+cols = 4
+
+# Contains the board state, where a true proposition represents that color peg in that position of the board.
+# Indexed with a row, column, and color string.
 board: List[List[Dict]] = []
-# Array of dictonaries, 
+
+# Index with a column number and a color string, propositions are true if that color is in that position in the answer
 correct_color_props: List[Dict] = []
 
 # 2 dimensional arrays representing whether a given peg matches the corresponsing position in the answer
 # And whether a color is in the wrong positoin but present in the answer.
-color_in_correct_position: List[List] = []
-color_used_in_answer: List[List] = []
+color_in_correct_position: List[List[GuessFeedbackPropositions]] = []
+color_used_in_answer: List[List[GuessFeedbackPropositions]] = []
 game_solved = SolvedProposition()
 
+# Holds the game's correct answer as color strings 
 answer = [] # Utility used to preserve the answer inbetween encoding resets
+
+# The set of colors allowed to be used in the code and guesses.
+# The letters are shorthands for red, orange, yellow, green, blue, purple, white, silver.
+# These colors were chosen because of their unique first letters.
 colors = ["r", "o", "y", "g", "b", "p", "w", "s"]
 
 # Create a disjunction of every element in the input list
@@ -89,6 +99,7 @@ def and_all(list):
         result = (result & item) if result else item
     return result
 
+# Implements bi-directional implication
 def if_and_only_if(a, b):
     return (a & b) | (~a & ~b)
 
