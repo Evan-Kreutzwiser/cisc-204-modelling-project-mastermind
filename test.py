@@ -13,7 +13,7 @@ def test_theory():
     set_answer()
 
     # This solver generates a new theory/encoding for every guess/row, so there is no single theory to make the assertions against
-    solution = solve_by_playing()
+    solution = solve_by_playing(feedback_pegs_column_specific=False)
 
     if solution:
         print("Solution:")
