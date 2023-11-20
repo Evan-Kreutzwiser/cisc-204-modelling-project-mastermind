@@ -1,5 +1,6 @@
 
 # For a complete module reference, see https://bauhaus.readthedocs.io/en/latest/bauhaus.html
+import itertools
 from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
@@ -25,7 +26,7 @@ class BasicPropositions:
 @proposition(E)
 class GuessFeedbackPropositions:
 
-    def __init__(self, data, in_correct_position):
+    def __init__(self, data, in_correct_position=False):
         self.data = data
         self.in_correct_position = in_correct_position
 
@@ -90,6 +91,32 @@ def and_all(list):
 
 def if_and_only_if(a, b):
     return (a & b) | (~a & ~b)
+
+# True when exactly `count` elements of true, false if any more or less elements are true 
+def exactly_k(count, list):
+    if count > len(list):
+        raise ValueError("Requiring more elements than there are present")
+
+    #print(f"list is {list}")
+    #print(f"count: {count}, {[x for x in itertools.combinations(list, count)]}")
+    return or_all(map(and_all, itertools.combinations(list, count)))
+
+# True when at least `count` elements are true, no less.
+# Implements at least k by forbidding all combinations where less than k are true
+def at_least_k(count, list):
+    if count > len(list):
+        raise ValueError("Requiring more elements than there are present")
+
+    all_less_than_k = [~or_all(list)] # 0 element special case
+
+
+    for size in range(1, count):
+        sets = itertools.combinations(list, size)
+        sets = [and_all([(item if item in list else ~item) for item in list]) for iter in sets]
+        all_less_than_k.extend(sets)
+
+    # If none of the models where fewer than `count` elements are satisfied, than at least that many must be
+    return ~or_all(all_less_than_k)
 
 
 def print_model(model, row_specific_solved_props = False):
@@ -241,7 +268,7 @@ def solve_all_at_once(allow_duplicate_colors=False):
 
 # Find the game's solution by playing it, making guesses one row at a time based 
 # on information from the previous guesses
-def solve_by_playing():
+def solve_by_playing(feedback_pegs_column_specific):
     
     if not answer or len(answer) != cols:
         raise ValueError('Answer not defined! Call set_answer() to generate a randomized answer, or set an answer manually, e.g. set_answer("r", "y", "g", "b")')
@@ -254,7 +281,10 @@ def solve_by_playing():
         # The solution from the previous iteration describes the state of the board this state carries through between the guesses.
         # The solver makes use of that data to make an educated guess for the next row, repeating until its guess matches the answer,
         # effectively playing the game similarly to how a human would 
-        T = guess_next_row(row, solution)
+        if feedback_pegs_column_specific:
+            T = guess_next_row_original_rules(row, solution)
+        else:
+            T = guess_next_row(row, solution)
         T = T.compile()
   
         # Check for problems with the model
@@ -267,6 +297,8 @@ def solve_by_playing():
         # uses the information from previous guesses
         solution = T.solve()
         number_of_solutions = count_solutions(T)
+        
+        print_model(solution)
         #print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
 
         # If the solver's guess matches the correct answer, the game is complete.
@@ -287,6 +319,89 @@ def solve_by_playing():
 
     return solution
 
+# Play the game using unmodified mastermind rules, where there is no promise that the feedback pegs match a single column
+def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
+    # Need to reuse encoding object, but purging everything might cause problems
+    # with the class definitions. Avoid using contraints on class definitions
+    E.clear_constraints()
+    E._custom_constraints.clear()
+
+    # Regenerate the answer constrains using the previously set answer, since we clobbered them just now 
+    build_correct_answer_constraints()
+
+    # Carry over the board's state from solving the previous row
+    if (model):
+        E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
+
+    # Add a new row each iteration
+    board.append([])
+    for col in range(cols):
+        board[current_row].append({})
+        for color in colors:
+            board[current_row][col][color] = BasicPropositions(f"{current_row}{col}{color}")
+
+    for row in range(len(board)):
+        for col in range(cols):
+            # Only one color can be present in a peg, and the solver must guess a color for each column
+            constraint.add_exactly_one(E, *board[row][col].values())
+            # This had to be changed to affect the entire board because the solver would 
+            # insert new colors into pegs from previous guesses that already had colors
+
+    # Add a new row of white/red feedback pegs as well
+    # IMPORTANT: This uses the feedback peg arrays differently than `guess_next_row`!
+    # The column index is replaced with a number of feedback pegs of that color `
+    color_in_correct_position.append([])
+    color_used_in_answer.append([])
+    for number_of_pegs in range(0, cols+1): # Anywhere from 0 correct colors to all of them are correct
+        # The logic needs to handle each number of pegs differently
+        # The number of pegs influences how many pieces of the guess are required to be reused
+        color_in_correct_position[current_row].append(GuessFeedbackPropositions(f"{current_row}{number_of_pegs}", in_correct_position=True))
+        color_used_in_answer[current_row].append(GuessFeedbackPropositions(f"{current_row}{number_of_pegs}"))
+        # Stored in array[row][number_of_pegs]
+
+    for row in range(len(board) - 1):
+        for number_of_pegs in range(1, cols+1):
+            # Red Pegs - Color is the in the right position
+            # Get a list of the propositions representing the colors that make up the correct answer
+            props_for_correct_colors = [board[row][col][answer_color] for col, answer_color in enumerate(answer)]
+            # If exactly k of the colors match the answer, then the proposition for that number of feedback pegs is true
+
+            E.add_constraint(color_in_correct_position[current_row][number_of_pegs] >> exactly_k(number_of_pegs, props_for_correct_colors))
+            
+            # White pegs - Color is used in the answer, but not in the right position
+            constraints = []
+            for col in range(cols):
+                other_columns = list(range(0, cols))
+                other_columns.pop(col)
+                # TODO: Revisit this if we decide to make color uniqueness optional
+                # Check that in at least one column other than this one the correct color is present
+                constraints.append(or_all([board[row][other_col][answer[other_col]] for other_col in other_columns]))
+
+            E.add_constraint(color_used_in_answer[current_row][number_of_pegs] >> exactly_k(number_of_pegs, constraints))
+
+    # Using the information from the feedback pegs, make another guess.
+    # The information is used by determining how the answer would be affected if we 
+    # knew for sure that the peg refered to the specific column, collecting this
+    # information for each position, and picking a model where at least k of the 
+    # restrictions the information entails are met.
+
+    for row in range(len(board)-1):
+        in_correct_position_constraints = []
+        in_wrong_position_constraints = []
+
+        for col in range(cols):
+            other_columns = list(range(0, cols))
+            other_columns.pop(col)
+            for color in colors:
+                in_correct_position_constraints.append(if_and_only_if(board[row][col][color], board[current_row][col][color]))
+                color_prop_in_other_cols = [board[current_row][other_col][color] for other_col in other_columns]
+                in_wrong_position_constraints.append(if_and_only_if(board[row][col][color], or_all(color_prop_in_other_cols)))
+
+        for number_of_pegs in range(cols+1):
+            E.add_constraint(color_in_correct_position[row][number_of_pegs] >> at_least_k(number_of_pegs, in_correct_position_constraints))
+            E.add_constraint(color_used_in_answer[row][number_of_pegs] >> at_least_k(number_of_pegs, in_wrong_position_constraints))
+
+    return E
 
 # Solve the puzzle one row at a time, letting the solver pick the next guess with the potential solution it returns
 # model is the result of T.solve() on the previous row
