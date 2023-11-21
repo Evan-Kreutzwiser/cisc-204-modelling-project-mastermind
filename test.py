@@ -20,7 +20,7 @@ def test_theory():
     if solution:
         print("Solution:")
         # Print a clean grid of which propositions / colors were selected for each position on the board 
-        print_model(solution)
+        print_model(solution, column_specific_feedback_pegs=False)
 
 
     # A default board of 4 columns with 8 colors has a over 4 * 8 * (# of rows) propositions, and each one is used in multiple constraints simultaniously
