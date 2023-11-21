@@ -120,9 +120,11 @@ def exactly_k(count, list):
     if count > len(list):
         raise ValueError("Requiring more elements than there are present")
 
-    #print(f"list is {list}")
-    #print(f"count: {count}, {[x for x in itertools.combinations(list, count)]}")
-    return or_all(map(and_all, itertools.combinations(list, count)))
+    # Create every possible combination of `count` elements being true and the others being false
+    sets_of_true_props = itertools.combinations(list, count)
+    combinations_of_true_and_false = [[prop if prop in prop_set else ~prop for prop in list] for prop_set in sets_of_true_props]
+
+    return or_all(map(and_all, combinations_of_true_and_false))
 
 # True when at least `count` elements are true, no less.
 # Implements at least k by forbidding all combinations where less than k are true
@@ -182,16 +184,18 @@ def print_model(model, row_specific_solved_props = False, column_specific_feedba
             # Find the number of feedback pegs for the row
             red_pegs = 0
             white_pegs = 0
-            print("Counting feedback pegs")
             for number in range(1, cols+1):
                 if model[color_in_correct_position[row][number]]:
                     red_pegs = number
                 if model[color_used_in_answer[row][number]] == True:
-                    print(model[color_used_in_answer[row][number]])
                     white_pegs = number
 
-            feedback_text = Text("█" * red_pegs, style="red")
-            feedback_text = Text("█" * white_pegs, style="white")
+            if red_pegs + white_pegs > cols:
+                feedback_text = Text("More feedback pegs than columns.\nSomething is wrong with the constraints.")    
+            else:
+                feedback_text = Text("▉" * red_pegs, style="rgb(235,20,20)")
+                feedback_text.append(Text("▉" * white_pegs, style="rgb(230,230,230)"))
+                feedback_text.append(" " * (cols - red_pegs - white_pegs))
 
         table.add_row(Text(str(row), justify="right"), board_rows, feedback_text)
 
@@ -431,15 +435,16 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
         color_used_in_answer[current_row].append(GuessFeedbackPropositions(f"{current_row}{number_of_pegs}"))
         # Stored in array[row][number_of_pegs]
 
+    # The feedback pegs are not calculated right away for the guess it is currently making
+    # Otherwise the solver might decide to make the proposition true and work backwards from the answer
     for row in range(len(board) - 1):
         for number_of_pegs in range(1, cols+1):
             # Red Pegs - Color is the in the right position
             # Get a list of the propositions representing the colors that make up the correct answer
-            props_for_correct_colors = [board[row][col][answer_color] for col, answer_color in enumerate(answer)]
+            props_for_correct_colors = [board[row][col][answer[col]] for col in range(cols)]
             # If exactly k of the colors match the answer, then the proposition for that number of feedback pegs is true
+            E.add_constraint(if_and_only_if(color_in_correct_position[row][number_of_pegs], exactly_k(number_of_pegs, props_for_correct_colors)))
 
-            E.add_constraint(~color_in_correct_position[current_row][number_of_pegs] | exactly_k(number_of_pegs, props_for_correct_colors))
-            
             # White pegs - Color is used in the answer, but not in the right position
             constraints = []
             for col in range(cols):
@@ -447,9 +452,10 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
                 other_columns.pop(col)
                 # TODO: Revisit this if we decide to make color uniqueness optional
                 # Check that in at least one column other than this one the correct color is present
-                constraints.append(or_all([board[row][other_col][answer[other_col]] for other_col in other_columns]))
+                color_in_position = [color for color in colors if model[board[row][col][color]] == True][0] # Find the color of the peg in that position
+                constraints.append(or_all([correct_color_props[other_col][color_in_position] for other_col in other_columns]))
 
-            E.add_constraint(color_used_in_answer[current_row][number_of_pegs] >> exactly_k(number_of_pegs, constraints))
+            E.add_constraint(if_and_only_if(color_used_in_answer[row][number_of_pegs], exactly_k(number_of_pegs, constraints)))
 
     # Using the information from the feedback pegs, make another guess.
     # The information is used by determining how the answer would be affected if we 
