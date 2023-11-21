@@ -69,6 +69,7 @@ correct_color_props: List[Dict] = []
 
 # 2 dimensional arrays representing whether a given peg matches the corresponsing position in the answer
 # And whether a color is in the wrong positoin but present in the answer.
+# Depending on the solver mode, the indexing is either a row and a column or a row and a number of that color of pegs
 color_in_correct_position: List[List[GuessFeedbackPropositions]] = []
 color_used_in_answer: List[List[GuessFeedbackPropositions]] = []
 game_solved = SolvedProposition()
@@ -293,9 +294,10 @@ def solve_by_playing(feedback_pegs_column_specific):
         # The solver makes use of that data to make an educated guess for the next row, repeating until its guess matches the answer,
         # effectively playing the game similarly to how a human would 
         if feedback_pegs_column_specific:
-            T = guess_next_row_original_rules(row, solution)
-        else:
             T = guess_next_row(row, solution)
+        else:
+            T = guess_next_row_original_rules(row, solution)
+
         T = T.compile()
   
         # Check for problems with the model
@@ -495,7 +497,7 @@ if __name__ == "__main__":
     # Generate a random solution for the game
     set_answer()
 
-    solution = solve_by_playing()
+    solution = solve_by_playing(feedback_pegs_column_specific=False)
 
     '''
     T = solve_all_at_once()

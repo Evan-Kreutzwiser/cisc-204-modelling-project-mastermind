@@ -13,6 +13,8 @@ def test_theory():
     set_answer()
 
     # This solver generates a new theory/encoding for every guess/row, so there is no single theory to make the assertions against
+    # Feedback pegs being column specifc is rule we made to work around a computer resource limitation during initial exploration.
+    # Setting `feedback_pegs_column_specific` to false is the regular mastermind rule.
     solution = solve_by_playing(feedback_pegs_column_specific=False)
 
     if solution:
