@@ -563,7 +563,11 @@ if __name__ == "__main__":
     set_answer()
 
     # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
-    solution = solve_by_playing(feedback_pegs_column_specific=False)
+    try:
+        solution = solve_by_playing(feedback_pegs_column_specific=False)
+    except (KeyboardInterrupt):
+        print("\nSolver interrupted.\n")
+        exit()
 
     '''
     T = solve_all_at_once()
