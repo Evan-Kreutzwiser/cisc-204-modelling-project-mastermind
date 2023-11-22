@@ -145,7 +145,7 @@ def at_least_k(count, list):
 
 
 # Print the board in a clear and visually appearing way
-def print_model(model, row_specific_solved_props = False, column_specific_feedback_pegs = False):
+def print_model(model, row_specific_solved_props = False, column_specific_feedback_pegs = True):
 
     # Red box if no model is present informing the user to check the constraints
     if (model is None):
@@ -375,7 +375,7 @@ def solve_by_playing(feedback_pegs_column_specific):
         number_of_solutions = count_solutions(T)
         
         print_model(solution, False, feedback_pegs_column_specific)
-        #print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
+        print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
 
         # If the solver's guess matches the correct answer, the game is complete.
         # This had to be moved from logic to python because the solver would work backwards
@@ -453,9 +453,13 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
                 # TODO: Revisit this if we decide to make color uniqueness optional
                 # Check that in at least one column other than this one the correct color is present
                 color_in_position = [color for color in colors if model[board[row][col][color]] == True][0] # Find the color of the peg in that position
-                constraints.append(or_all([correct_color_props[other_col][color_in_position] for other_col in other_columns]))
+                constraints.append(or_all([correct_color_props[other_col][color_in_position] & ~board[row][other_col][color] for other_col in other_columns]))
+                # [...] & ~board[row][other_col][color] ensures that there is not an extraneous white peg when duplicate colors are present
 
             E.add_constraint(if_and_only_if(color_used_in_answer[row][number_of_pegs], exactly_k(number_of_pegs, constraints)))
+
+    # Force the unused current row of feedback pegs to false so they don't influence the solutions counter
+    E.add_constraint(~or_all(color_in_correct_position[current_row]) & ~or_all(color_used_in_answer[current_row]))
 
     # Using the information from the feedback pegs, make another guess.
     # The information is used by determining how the answer would be affected if we 
@@ -467,17 +471,23 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
         in_correct_position_constraints = []
         in_wrong_position_constraints = []
 
+        dont_use_again_constraints = []
+
         for col in range(cols):
-            other_columns = list(range(0, cols))
-            other_columns.pop(col)
             for color in colors:
-                in_correct_position_constraints.append(if_and_only_if(board[row][col][color], board[current_row][col][color]))
-                color_prop_in_other_cols = [board[current_row][other_col][color] for other_col in other_columns]
-                in_wrong_position_constraints.append(if_and_only_if(board[row][col][color], or_all(color_prop_in_other_cols)))
+                color_in_all_cols_current_row = [board[current_row][c][color] for c in range(cols)]
+                in_correct_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
+                in_wrong_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
+                #in_correct_position_constraints.append(board[row][col][color] & board[current_row][col][color])
+                #color_prop_in_other_cols = [board[current_row][other_col][color] for other_col in other_columns]
+                #in_wrong_position_constraints.append(~board[row][col][color] | or_all(color_prop_in_other_cols))
+                dont_use_again_constraints.append(~(board[row][col][color] & or_all(color_in_all_cols_current_row)))
 
         for number_of_pegs in range(cols+1):
             E.add_constraint(~color_in_correct_position[row][number_of_pegs] | at_least_k(number_of_pegs, in_correct_position_constraints))
             E.add_constraint(~color_used_in_answer[row][number_of_pegs] | at_least_k(number_of_pegs, in_wrong_position_constraints))
+
+        E.add_constraint((~color_in_correct_position[row][0] & ~color_used_in_answer[row][0]) | and_all(dont_use_again_constraints))
 
     return E
 
