@@ -407,7 +407,7 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
 
     # Carry over the board's state from solving the previous row
     if (model):
-        E.add_constraint(and_all([prop for prop in model if model[prop] == True]))
+        E.add_constraint(and_all([prop if model[prop] == True else ~prop for prop in model]))
 
     # Add a new row each iteration
     board.append([])
@@ -416,29 +416,32 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
         for color in colors:
             board[current_row][col][color] = BasicPropositions(current_row, col, color)
 
-    for row in range(len(board)):
-        for col in range(cols):
-            # Only one color can be present in a peg, and the solver must guess a color for each column
-            constraint.add_exactly_one(E, *board[row][col].values())
-            # This had to be changed to affect the entire board because the solver would 
-            # insert new colors into pegs from previous guesses that already had colors
+    # Prevent the guess from containing duplicate colors
+    for col in range(cols):
+        # Only one color can be present in a peg, and the solver must guess a color for each column
+        # Due to how state is carried over the solver can't add/remove colors from previous guesses, so this only applies to the new guess
+        constraint.add_exactly_one(E, *board[-1][col].values())
 
     # Add a new row of white/red feedback pegs as well
     # IMPORTANT: This uses the feedback peg arrays differently than `guess_next_row`!
     # The column index is replaced with a number of feedback pegs of that color `
-    color_in_correct_position.append([])
-    color_used_in_answer.append([])
-    for number_of_pegs in range(0, cols+1): # Anywhere from 0 correct colors to all of them are correct
-        # The logic needs to handle each number of pegs differently
-        # The number of pegs influences how many pieces of the guess are required to be reused
-        color_in_correct_position[current_row].append(GuessFeedbackPropositions(f"{current_row}{number_of_pegs}", in_correct_position=True))
-        color_used_in_answer[current_row].append(GuessFeedbackPropositions(f"{current_row}{number_of_pegs}"))
-        # Stored in array[row][number_of_pegs]
 
-    # The feedback pegs are not calculated right away for the guess it is currently making
+    # The feedback peg creation will always be one row behind. Oringinally it kept up and left the propositions'
+    # values to chance but ended up getting locked to the wrong values by the state handover as a result.
+    if (current_row > 0):
+        color_in_correct_position.append([])
+        color_used_in_answer.append([])
+        for number_of_pegs in range(0, cols+1): # Anywhere from 0 correct colors to all of them being correct
+            # The logic needs to handle each number of pegs differently
+            # The number of pegs influences how many pieces of the guess are required to be reused
+            color_in_correct_position[current_row-1].append(GuessFeedbackPropositions(f"{current_row-1}{number_of_pegs}", in_correct_position=True))
+            color_used_in_answer[current_row-1].append(GuessFeedbackPropositions(f"{current_row-1}{number_of_pegs}"))
+            # Stored in array[row][number_of_pegs]
+    
+    # The feedback pegs for the current row are not calculated right away
     # Otherwise the solver might decide to make the proposition true and work backwards from the answer
     for row in range(len(board) - 1):
-        for number_of_pegs in range(1, cols+1):
+        for number_of_pegs in range(0, cols+1):
             # Red Pegs - Color is the in the right position
             # Get a list of the propositions representing the colors that make up the correct answer
             props_for_correct_colors = [board[row][col][answer[col]] for col in range(cols)]
@@ -453,13 +456,13 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
                 # TODO: Revisit this if we decide to make color uniqueness optional
                 # Check that in at least one column other than this one the correct color is present
                 color_in_position = [color for color in colors if model[board[row][col][color]] == True][0] # Find the color of the peg in that position
-                constraints.append(or_all([correct_color_props[other_col][color_in_position] & ~board[row][other_col][color] for other_col in other_columns]))
+                for color in colors:
+                    if model[board[row][col][color]] == True:
+                        constraints.append(or_all([correct_color_props[other_col][color] & ~board[row][other_col][color] for other_col in other_columns]))
                 # [...] & ~board[row][other_col][color] ensures that there is not an extraneous white peg when duplicate colors are present
 
             E.add_constraint(if_and_only_if(color_used_in_answer[row][number_of_pegs], exactly_k(number_of_pegs, constraints)))
 
-    # Force the unused current row of feedback pegs to false so they don't influence the solutions counter
-    E.add_constraint(~or_all(color_in_correct_position[current_row]) & ~or_all(color_used_in_answer[current_row]))
 
     # Using the information from the feedback pegs, make another guess.
     # The information is used by determining how the answer would be affected if we 
@@ -473,21 +476,50 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
 
         dont_use_again_constraints = []
 
+        guess_to_avoid_repeating = []
+
         for col in range(cols):
             for color in colors:
+
+                
+                # Collect information about a previous guess to ensure its not repeated
+                # (Constraint added below, once everything has been found)
+                if (model[board[row][col][color]]):
+                    guess_to_avoid_repeating.append(board[current_row][col][color])
+
                 color_in_all_cols_current_row = [board[current_row][c][color] for c in range(cols)]
+                color_in_other_cols_current_row = [board[current_row][c][color] if c != col else ~board[current_row][c][color] for c in range(cols)]
+
                 in_correct_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
-                in_wrong_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
                 #in_correct_position_constraints.append(board[row][col][color] & board[current_row][col][color])
+                in_wrong_position_constraints.append(board[row][col][color] & or_all(color_in_other_cols_current_row))
                 #color_prop_in_other_cols = [board[current_row][other_col][color] for other_col in other_columns]
                 #in_wrong_position_constraints.append(~board[row][col][color] | or_all(color_prop_in_other_cols))
+                
+                # Create a long list of constraints that saying that a color can't be used anywhere in the guess while also being used in the previous guess
+                # The entire list is implied by none of the previous guesses' colors being in the answer, only affecting the guess in that condition
                 dont_use_again_constraints.append(~(board[row][col][color] & or_all(color_in_all_cols_current_row)))
+                # If a guesses' feedback is only white pegs, don't use any of the colors in the same column again
+                # Constraint reads: There can't be a situation where there are no red pegs in a row and part of a guess matches the color in the same column of that row
+                E.add_constraint(~(color_in_correct_position[row][0] & board[current_row][col][color] & board[row][col][color]))
+
+#                if (current_row -2 == row and model[board[row][col][color]] == True):
+#                    print(model)
+#                    print(~(color_in_correct_position[row][0] & board[current_row][col][color] & board[row][col][color]))
+#                    print(str(model[color_in_correct_position[row][0]]) + " " + str(model[board[row][col][color]]))
 
         for number_of_pegs in range(cols+1):
             E.add_constraint(~color_in_correct_position[row][number_of_pegs] | at_least_k(number_of_pegs, in_correct_position_constraints))
             E.add_constraint(~color_used_in_answer[row][number_of_pegs] | at_least_k(number_of_pegs, in_wrong_position_constraints))
 
-        E.add_constraint((~color_in_correct_position[row][0] & ~color_used_in_answer[row][0]) | and_all(dont_use_again_constraints))
+        # If a guess got no feedback pegs at all, it means that none of the colors in the guess are in the solution at all, and they should not be used from now on
+        E.add_constraint(~(color_in_correct_position[row][0] & color_used_in_answer[row][0]) | and_all(dont_use_again_constraints))
+
+        # Prevent repeating previous guesses
+        # Uses model info extracted in python to avoid enumerating all possiblities resource-inefficiently
+        E.add_constraint(~and_all(guess_to_avoid_repeating))
+
+    #E.add_constraint(board[0][0]["b"] & board[0][1]["p"] & board[0][2]["w"] & board[0][3]["s"])
 
     return E
 
@@ -571,6 +603,7 @@ if __name__ == "__main__":
     
     # Generate a random solution for the game
     set_answer()
+    #set_answer("r", "o", "y", "g")
 
     # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
     try:
