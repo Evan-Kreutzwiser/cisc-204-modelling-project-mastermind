@@ -1,9 +1,13 @@
+#!/usr/bin/python3
 
-# For a complete module reference, see https://bauhaus.readthedocs.io/en/latest/bauhaus.html
+import argparse
 from cgitb import text
 from curses import panel
 import itertools
+import re
 import time
+import datetime
+# For a complete module reference, see https://bauhaus.readthedocs.io/en/latest/bauhaus.html
 from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
@@ -70,6 +74,11 @@ class SolvedProposition:
 # Board dimensions
 rows = 8
 cols = 4
+
+# Output / board rendering supression
+quiet = False
+# How many times to run the solver
+repetitions = 1
 
 # Contains the board state, where a true proposition represents that color peg in that position of the board.
 # Indexed with a row, column, and color string.
@@ -148,8 +157,40 @@ def at_least_k(count, list):
     return ~or_all(all_less_than_k)
 
 
+def parse_args():
+    global cols, quiet, repetitions
+
+    parser = argparse.ArgumentParser(
+        prog='python3 run.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('-a', '--answer', nargs='*', choices=colors, help='')
+    parser.add_argument('-n', type=int, default=1, help='Number of times to run the solver')
+    # Can have 2 to 8 columns. The constraints don't handle a single column well and there are 8 different colors
+    parser.add_argument('-c', '--columns', type=int, default=4, choices=range(2,9), help='Change the number of columns in the game board')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Don\'t display the board')
+    parser.add_argument('-o', '--output', type=str, help='Save results to a file in csv format. Useful with -n for automated data collection')
+
+    namespace = parser.parse_args()
+
+    cols = namespace.columns
+    repetitions = namespace.n
+    if namespace.quiet:
+        quiet = True
+
+    # Validate answer
+    if len(namespace.answer) != cols:
+        print(f"Length of answer must match number of columns. There are {cols} columns and the given answer contains {len(namespace.answer)} color(s).")
+        exit()
+    given_colors = []
+    for color in namespace.answer:
+        if color in given_colors:
+            print(f"Answer cannot contain duplicate colors.")
+            exit()
+        else:
+            given_colors.append(color)
+
 # Print the board in a clear and visually appearing way
-def print_model(model, row_specific_solved_props = False, column_specific_feedback_pegs = True):
+def print_model(model, column_specific_feedback_pegs = True):
 
     # Red box if no model is present informing the user to check the constraints
     if (model is None):
@@ -195,27 +236,35 @@ def print_model(model, row_specific_solved_props = False, column_specific_feedba
 
         board_rows.append("\n")
 
+        # Find the number of feedback pegs for the row
         feedback_text = None
+        red_pegs = 0
+        white_pegs = 0
         if not column_specific_feedback_pegs and row != len(board)-1:
-            # Find the number of feedback pegs for the row
-            red_pegs = 0
-            white_pegs = 0
             for number in range(1, cols+1):
                 if model[color_in_correct_position[row][number]] == True:
                     red_pegs = number
                 if model[color_used_in_answer[row][number]] == True:
                     white_pegs = number
 
-            if red_pegs + white_pegs > cols:
-                feedback_text = Text("More feedback pegs than columns.\nSomething is wrong with the constraints.")    
-            else:
-                feedback_text = Text("▉" * red_pegs, style="rgb(235,20,20)")
-                feedback_text.append(Text("▉" * white_pegs, style="rgb(230,230,230)"))
-                feedback_text.append(" " * (cols - red_pegs - white_pegs))
+        elif not column_specific_feedback_pegs:
+            # Determine the feedback for the most recent guess manually since the values haven't been set in the model
+            for col in range(cols):
+                for color in colors:
+                    if answer[col] == color and model[board[row][col][color]]:
+                        red_pegs += 1
+                    # If the guess contains the matching color in a different column and there isn't a duplicate in the correct coloumn to count as a red peg
+                    if answer[col] == color and True in [model[board[row][other_col][color]] for other_col in range(cols) if other_col != col] and not model[board[row][col][color]]:
+                        white_pegs += 1
+
+        if red_pegs + white_pegs > cols:
+            feedback_text = Text("More feedback pegs than columns.\nSomething is wrong with the constraints.")    
+        else:
+            feedback_text = Text("▉" * red_pegs, style="rgb(235,20,20)")
+            feedback_text.append(Text("▉" * white_pegs, style="rgb(230,230,230)"))
+            feedback_text.append(" " * (cols - red_pegs - white_pegs))
 
         table.add_row(Text(str(row), justify="right"), board_rows, feedback_text)
-
-        #print(("%d: " + "%s "*cols) % (row, *[[prop for prop in col.values() if model[prop] == True] or  "[     ]" for col in board[row]]))
 
     rich_print(table)
         
@@ -256,7 +305,7 @@ def set_answer(*answer_colors):
         for color in colors:
             correct_color_props[col][color] = AnswerPropositions(str(col) + color)
 
-    print("Correct answer is: " + " ".join(answer) + "\n")
+    #print("Correct answer is: " + " ".join(answer) + "\n")
 
 
 # Generate constraints to make the game's answer a fixed value.
@@ -354,12 +403,17 @@ def solve_all_at_once(allow_duplicate_colors=False):
 # Find the game's solution by playing it, making guesses one row at a time based 
 # on information from the previous guesses
 def solve_by_playing(feedback_pegs_column_specific):
-    
+    global color_in_correct_position, color_used_in_answer, board
+
     if not answer or len(answer) != cols:
         raise ValueError('Answer not defined! Call set_answer() to generate a randomized answer, or set an answer manually, e.g. set_answer("r", "y", "g", "b")')
 
     row = 0
     solution = None
+    # Erase the global state for a clean slate in case this is played multiple times
+    board = []
+    color_in_correct_position = []
+    color_used_in_answer = []
     # Play the game on an infinite number of rows until the solution is found
     while True:
         # Make a guess for this turn
@@ -385,9 +439,10 @@ def solve_by_playing(feedback_pegs_column_specific):
         # uses the information from previous guesses
         solution = T.solve()
         number_of_solutions = count_solutions(T)
-        
-        print_model(solution, False, feedback_pegs_column_specific)
-        print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
+
+        if not quiet:
+            print_model(solution, feedback_pegs_column_specific)
+            print("%d Possible intelligent guess(es) for row %d" % (number_of_solutions, row))
 
         # If the solver's guess matches the correct answer, the game is complete.
         # This had to be moved from logic to python because the solver would work backwards
@@ -409,11 +464,6 @@ def solve_by_playing(feedback_pegs_column_specific):
 
 # Play the game using unmodified mastermind rules, where there is no promise that the feedback pegs match a single column
 def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
-
-    l = [BasicPropositions("A", "", ""),BasicPropositions("B", "", ""),BasicPropositions("C", "", ""),BasicPropositions("D", "", "")]
-
-    #print(at_least_k(2, l))
-
     # Need to reuse encoding object, but purging everything might cause problems
     # with the class definitions. Avoid using contraints on class definitions
     E.clear_constraints()
@@ -619,6 +669,9 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
 
 
 if __name__ == "__main__":
+
+    parse_args()
+
     # Make the solution Silver, Green, Yellow, Orange
     #set_answer("s", "g", "y", "o")
     
@@ -626,42 +679,48 @@ if __name__ == "__main__":
     set_answer()
     #set_answer("r", "o", "y", "g")
 
-    
-    start_time = time.time()
+    for repetition in range(repetitions):
+        start_time = time.time()
 
-    # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
-    try:
-        solution = solve_by_playing(feedback_pegs_column_specific=False)
-    except (KeyboardInterrupt):
-        print("\nSolver interrupted.\n")
-        exit()
+        # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
+        try:
+            solution = solve_by_playing(feedback_pegs_column_specific=False)
+        except (KeyboardInterrupt):
+            print("\nSolver interrupted.\n")
+            exit()
 
-    
-    time_to_solve = time.time() - start_time
+        
+        time_to_solve = time.time() - start_time
 
-    print(f"Solved in {time.ctime(time_to_solve)}")
+        # Create a human-readable representation of the time taken
+        minutes = time_to_solve // 60
+        seconds = time_to_solve % 60
+        time_text =  (f"{minutes} minutes and" if minutes > 1 else f"1 minute and") if minutes > 0 else ""
+        time_text += f" {seconds:.2f} " + "seconds" if seconds != 1 else "second"
 
-    '''
-    T = solve_all_at_once()
-    # Don't compile until you're finished adding all your constraints!
-    T = T.compile()
-    # After compilation (and only after), you can check some of the properties
-    # of your model:
-    print("\nSatisfiable: %s" % T.satisfiable())
-    print("# Solutions: %d" % count_solutions(T))
-    solution = T.solve()
-    '''
-    if solution:
-        print("Solution:")
-        # Print a clean grid of which propositions / colors were selected for each position on the board 
-        print_model(solution, column_specific_feedback_pegs=False)
-    '''
-        print("\nVariable likelihoods: ")
-        for row in range(len(board)):
-            for col in range(cols):
-                for p in board[row][col].values():
-                    # Ensure that you only send these functions NNF formulas
-                    # Literals are compiled to NNF here
-                    print(" %s: %.2f" % (p, likelihood(T, p)))
-    print()
-    '''
+        print(f"Solved in {time_text}")
+
+        '''
+        T = solve_all_at_once()
+        # Don't compile until you're finished adding all your constraints!
+        T = T.compile()
+        # After compilation (and only after), you can check some of the properties
+        # of your model:
+        print("\nSatisfiable: %s" % T.satisfiable())
+        print("# Solutions: %d" % count_solutions(T))
+        solution = T.solve()
+        '''
+        if solution:
+            print("Solution:")
+            # Print a clean grid of which propositions / colors were selected for each position on the board 
+            print_model(solution, column_specific_feedback_pegs=False)
+        '''
+            print("\nVariable likelihoods: ")
+            for row in range(len(board)):
+                for col in range(cols):
+                    for p in board[row][col].values():
+                        # Ensure that you only send these functions NNF formulas
+                        # Literals are compiled to NNF here
+                        print(" %s: %.2f" % (p, likelihood(T, p)))
+        print()
+        '''
