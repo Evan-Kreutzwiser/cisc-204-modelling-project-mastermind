@@ -3,6 +3,7 @@
 from cgitb import text
 from curses import panel
 import itertools
+import time
 from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
@@ -10,6 +11,7 @@ import random
 
 from rich import print as rich_print
 from rich.panel import Panel
+from rich.columns import Columns
 from rich.text import Text
 from rich.table import Table
 
@@ -132,13 +134,15 @@ def at_least_k(count, list):
     if count > len(list):
         raise ValueError("Requiring more elements than there are present")
 
-    all_less_than_k = [~or_all(list)] # 0 element special case
+    all_less_than_k = []
 
-
-    for size in range(1, count):
+    for size in range(0, count):
         sets = itertools.combinations(list, size)
-        sets = [and_all([(item if item in list else ~item) for item in list]) for iter in sets]
+        sets = [and_all([(item if item in iter else ~item) for item in list]) for iter in sets]
         all_less_than_k.extend(sets)
+
+    #print()
+    #print(~or_all(all_less_than_k))
 
     # If none of the models where fewer than `count` elements are satisfied, than at least that many must be
     return ~or_all(all_less_than_k)
@@ -155,8 +159,20 @@ def print_model(model, row_specific_solved_props = False, column_specific_feedba
         print()
         return
 
+    # Check whether the game was won
+    game_finished = True
+    for col in range(cols):
+        correct_prop = board[-1][col][answer[col]]
+        if model[correct_prop] == False:
+            game_finished = False
 
+
+    answer_box_shade = "███ " if game_finished else "▒▒▒ " 
+    answer_text = Text(" ").append(Text("").join([Text(answer_box_shade, style=color_rich_styles[color]) for color in answer]))
+    
     table = Table()
+    table.add_column("")
+    table.add_column(answer_text)
 
     # Rows are printed in reverse order such that the first guess is on the bottom and the solution on the top
     for row in range(len(board)-1, -1, -1):
@@ -185,7 +201,7 @@ def print_model(model, row_specific_solved_props = False, column_specific_feedba
             red_pegs = 0
             white_pegs = 0
             for number in range(1, cols+1):
-                if model[color_in_correct_position[row][number]]:
+                if model[color_in_correct_position[row][number]] == True:
                     red_pegs = number
                 if model[color_used_in_answer[row][number]] == True:
                     white_pegs = number
@@ -202,12 +218,6 @@ def print_model(model, row_specific_solved_props = False, column_specific_feedba
         #print(("%d: " + "%s "*cols) % (row, *[[prop for prop in col.values() if model[prop] == True] or  "[     ]" for col in board[row]]))
 
     rich_print(table)
-
-    game_finished = True
-    for col in range(cols):
-        correct_prop = board[-1][col][answer[col]]
-        if model[correct_prop] == False:
-            game_finished = False
         
     #print("Solved" if (not row_specific_solved_props) and game_finished else "Not solved")
     print()
@@ -365,8 +375,10 @@ def solve_by_playing(feedback_pegs_column_specific):
   
         # Check for problems with the model
         if T.valid():
+            print(f"Model at start of guess: {solution}")
             raise RuntimeError("Theory is valid - every model is true. Something is wrong with the constraints")  
         if T.negate().valid():
+            print(f"Model at start of guess: {solution}")
             raise RuntimeError("Theory has no solutions. Something is wrong with the constraints")
         
         # The SAT solver randomly picks a valid model, which represents an intelligent guess that correctly 
@@ -397,6 +409,11 @@ def solve_by_playing(feedback_pegs_column_specific):
 
 # Play the game using unmodified mastermind rules, where there is no promise that the feedback pegs match a single column
 def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
+
+    l = [BasicPropositions("A", "", ""),BasicPropositions("B", "", ""),BasicPropositions("C", "", ""),BasicPropositions("D", "", "")]
+
+    #print(at_least_k(2, l))
+
     # Need to reuse encoding object, but purging everything might cause problems
     # with the class definitions. Avoid using contraints on class definitions
     E.clear_constraints()
@@ -441,27 +458,27 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
     # The feedback pegs for the current row are not calculated right away
     # Otherwise the solver might decide to make the proposition true and work backwards from the answer
     for row in range(len(board) - 1):
+        # Red Pegs - Color is the in the right position
+        # Get a list of the propositions representing the colors that make up the correct answer
+        props_for_correct_colors = [board[row][col][answer[col]] for col in range(cols)]
+
+        # White pegs - Color is used in the answer, but not in the right position
+        white_peg_constraints = []
+        for col in range(cols):
+            other_columns = list(range(0, cols))
+            other_columns.pop(col)
+            # TODO: Revisit this if we decide to make color uniqueness optional
+            # Check that in at least one column other than this one the correct color is present
+            for color in colors:
+                    if model[board[row][col][color]] == True:
+                        white_peg_constraints.append(or_all([correct_color_props[other_col][color] & ~board[row][other_col][color] for other_col in other_columns]))
+                        # [...] & ~board[row][other_col][color] ensures that there is not an extraneous white peg when duplicate colors are present
+
         for number_of_pegs in range(0, cols+1):
-            # Red Pegs - Color is the in the right position
-            # Get a list of the propositions representing the colors that make up the correct answer
-            props_for_correct_colors = [board[row][col][answer[col]] for col in range(cols)]
-            # If exactly k of the colors match the answer, then the proposition for that number of feedback pegs is true
+            # If exactly k of the colors match the answer, then the proposition for that number of red feedback pegs is true
             E.add_constraint(if_and_only_if(color_in_correct_position[row][number_of_pegs], exactly_k(number_of_pegs, props_for_correct_colors)))
 
-            # White pegs - Color is used in the answer, but not in the right position
-            constraints = []
-            for col in range(cols):
-                other_columns = list(range(0, cols))
-                other_columns.pop(col)
-                # TODO: Revisit this if we decide to make color uniqueness optional
-                # Check that in at least one column other than this one the correct color is present
-                color_in_position = [color for color in colors if model[board[row][col][color]] == True][0] # Find the color of the peg in that position
-                for color in colors:
-                    if model[board[row][col][color]] == True:
-                        constraints.append(or_all([correct_color_props[other_col][color] & ~board[row][other_col][color] for other_col in other_columns]))
-                # [...] & ~board[row][other_col][color] ensures that there is not an extraneous white peg when duplicate colors are present
-
-            E.add_constraint(if_and_only_if(color_used_in_answer[row][number_of_pegs], exactly_k(number_of_pegs, constraints)))
+            E.add_constraint(if_and_only_if(color_used_in_answer[row][number_of_pegs], exactly_k(number_of_pegs, white_peg_constraints)))
 
 
     # Using the information from the feedback pegs, make another guess.
@@ -470,18 +487,15 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
     # information for each position, and picking a model where at least k of the 
     # restrictions the information entails are met.
 
-    for row in range(len(board)-1):
+    for row in range(0, len(board)-1):
         in_correct_position_constraints = []
         in_wrong_position_constraints = []
-
         dont_use_again_constraints = []
-
         guess_to_avoid_repeating = []
+
 
         for col in range(cols):
             for color in colors:
-
-                
                 # Collect information about a previous guess to ensure its not repeated
                 # (Constraint added below, once everything has been found)
                 if (model[board[row][col][color]]):
@@ -490,25 +504,32 @@ def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
                 color_in_all_cols_current_row = [board[current_row][c][color] for c in range(cols)]
                 color_in_other_cols_current_row = [board[current_row][c][color] if c != col else ~board[current_row][c][color] for c in range(cols)]
 
-                in_correct_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
+                #in_correct_position_constraints.append(board[row][col][color] & or_all(color_in_all_cols_current_row))
+                
+                if (model[board[row][col][color]]): # Optimize by not creating constraints that we know ahead of time can't be satisfied
+                    in_correct_position_constraints.append(board[row][col][color] & board[current_row][col][color])
+               
+                if (model[board[row][col][color]]):
+                    in_wrong_position_constraints.append(board[row][col][color] & or_all(color_in_other_cols_current_row) & ~board[current_row][col][color])
+               
                 #in_correct_position_constraints.append(board[row][col][color] & board[current_row][col][color])
-                in_wrong_position_constraints.append(board[row][col][color] & or_all(color_in_other_cols_current_row))
                 #color_prop_in_other_cols = [board[current_row][other_col][color] for other_col in other_columns]
                 #in_wrong_position_constraints.append(~board[row][col][color] | or_all(color_prop_in_other_cols))
                 
                 # Create a long list of constraints that saying that a color can't be used anywhere in the guess while also being used in the previous guess
                 # The entire list is implied by none of the previous guesses' colors being in the answer, only affecting the guess in that condition
-                dont_use_again_constraints.append(~(board[row][col][color] & or_all(color_in_all_cols_current_row)))
+                if (model[board[row][col][color]]):
+                    dont_use_again_constraints.append(~(board[row][col][color] & or_all(color_in_all_cols_current_row)))
                 # If a guesses' feedback is only white pegs, don't use any of the colors in the same column again
                 # Constraint reads: There can't be a situation where there are no red pegs in a row and part of a guess matches the color in the same column of that row
                 E.add_constraint(~(color_in_correct_position[row][0] & board[current_row][col][color] & board[row][col][color]))
 
-#                if (current_row -2 == row and model[board[row][col][color]] == True):
-#                    print(model)
-#                    print(~(color_in_correct_position[row][0] & board[current_row][col][color] & board[row][col][color]))
-#                    print(str(model[color_in_correct_position[row][0]]) + " " + str(model[board[row][col][color]]))
+                #if (current_row -2 == row and model[board[row][col][color]] == True):
+                #    print(model)
+                #    print(~(color_in_correct_position[row][0] & board[current_row][col][color] & board[row][col][color]))
+                #    print(str(model[color_in_correct_position[row][0]]) + " " + str(model[board[row][col][color]]))
 
-        for number_of_pegs in range(cols+1):
+        for number_of_pegs in range(1, cols+1):
             E.add_constraint(~color_in_correct_position[row][number_of_pegs] | at_least_k(number_of_pegs, in_correct_position_constraints))
             E.add_constraint(~color_used_in_answer[row][number_of_pegs] | at_least_k(number_of_pegs, in_wrong_position_constraints))
 
@@ -605,12 +626,20 @@ if __name__ == "__main__":
     set_answer()
     #set_answer("r", "o", "y", "g")
 
+    
+    start_time = time.time()
+
     # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
     try:
         solution = solve_by_playing(feedback_pegs_column_specific=False)
     except (KeyboardInterrupt):
         print("\nSolver interrupted.\n")
         exit()
+
+    
+    time_to_solve = time.time() - start_time
+
+    print(f"Solved in {time.ctime(time_to_solve)}")
 
     '''
     T = solve_all_at_once()
@@ -625,7 +654,7 @@ if __name__ == "__main__":
     if solution:
         print("Solution:")
         # Print a clean grid of which propositions / colors were selected for each position on the board 
-        print_model(solution)
+        print_model(solution, column_specific_feedback_pegs=False)
     '''
         print("\nVariable likelihoods: ")
         for row in range(len(board)):
