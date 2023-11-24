@@ -95,7 +95,7 @@ color_used_in_answer: List[List[GuessFeedbackPropositions]] = []
 game_solved = SolvedProposition()
 
 # Holds the game's correct answer as color strings 
-answer = [] # Utility used to preserve the answer inbetween encoding resets
+answer = None # Utility used to preserve the answer inbetween encoding resets
 
 # The set of colors allowed to be used in the code and guesses.
 # The letters are shorthands for red, orange, yellow, green, blue, purple, white, silver.
@@ -178,16 +178,19 @@ def parse_args():
         quiet = True
 
     # Validate answer
-    if len(namespace.answer) != cols:
-        print(f"Length of answer must match number of columns. There are {cols} columns and the given answer contains {len(namespace.answer)} color(s).")
-        exit()
-    given_colors = []
-    for color in namespace.answer:
-        if color in given_colors:
-            print(f"Answer cannot contain duplicate colors.")
+    if namespace.answer is not None:
+        if len(namespace.answer) != cols:
+            print(f"Length of answer must match number of columns. There are {cols} columns and the given answer contains {len(namespace.answer)} color(s).")
             exit()
-        else:
-            given_colors.append(color)
+        given_colors = []
+        for color in namespace.answer:
+            if color in given_colors:
+                print(f"Answer cannot contain duplicate colors.")
+                exit()
+            else:
+                given_colors.append(color)
+
+        set_answer(*namespace.answer)
 
 # Print the board in a clear and visually appearing way
 def print_model(model, column_specific_feedback_pegs = True):
@@ -676,9 +679,10 @@ if __name__ == "__main__":
     #set_answer("s", "g", "y", "o")
     
     # Generate a random solution for the game
-    set_answer()
-    #set_answer("r", "o", "y", "g")
-
+    # Does not override answers provided in the command line arguments
+    if answer is None:
+        set_answer()
+    
     for repetition in range(repetitions):
         start_time = time.time()
 
