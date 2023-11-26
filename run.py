@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import argparse
+from ast import Tuple
 from cgitb import text
 from curses import panel
 import itertools
@@ -12,6 +13,7 @@ from bauhaus import Encoding, proposition, constraint
 from bauhaus.utils import count_solutions, likelihood
 from typing import List, Dict
 import random
+import csv
 
 from rich import print as rich_print
 from rich.panel import Panel
@@ -79,6 +81,9 @@ cols = 4
 quiet = False
 # How many times to run the solver
 repetitions = 1
+# CSV file recording the results of the run (Useful with more repititions for analysing results)
+output_file = None
+csv_writer = None
 
 # Contains the board state, where a true proposition represents that color peg in that position of the board.
 # Indexed with a row, column, and color string.
@@ -158,7 +163,7 @@ def at_least_k(count, list):
 
 
 def parse_args():
-    global cols, quiet, repetitions
+    global cols, quiet, repetitions, output_file, csv_writer
 
     parser = argparse.ArgumentParser(
         prog='python3 run.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -181,16 +186,25 @@ def parse_args():
     if namespace.answer is not None:
         if len(namespace.answer) != cols:
             print(f"Length of answer must match number of columns. There are {cols} columns and the given answer contains {len(namespace.answer)} color(s).")
-            exit()
+            exit(1)
         given_colors = []
         for color in namespace.answer:
             if color in given_colors:
                 print(f"Answer cannot contain duplicate colors.")
-                exit()
+                exit(1)
             else:
                 given_colors.append(color)
 
         set_answer(*namespace.answer)
+
+    if namespace.output:
+        try:
+            output_file = open(namespace.output, "w+")
+            csv_writer = csv.writer(output_file)
+        except Exception as Error:
+            print("Could not open output file: " + Error)
+            #print("Error opening output file " + namespace.output);
+            exit(1)
 
 # Print the board in a clear and visually appearing way
 def print_model(model, column_specific_feedback_pegs = True):
@@ -404,8 +418,11 @@ def solve_all_at_once(allow_duplicate_colors=False):
     return E
 
 # Find the game's solution by playing it, making guesses one row at a time based 
-# on information from the previous guesses
-def solve_by_playing(feedback_pegs_column_specific):
+# on information from the previous guesses.
+# Column specific feedback pegs is a rule alteration to speed up execution and provide
+# a topic to analyse is required. A value of false uses the standard game rules.
+# Returns the solution model, the number of guesses taken to solve, and a list of how long each guess took
+def solve_by_playing(feedback_pegs_column_specific: bool) -> tuple[Dict, int, List]:
     global color_in_correct_position, color_used_in_answer, board
 
     if not answer or len(answer) != cols:
@@ -417,8 +434,14 @@ def solve_by_playing(feedback_pegs_column_specific):
     board = []
     color_in_correct_position = []
     color_used_in_answer = []
+
+    # How long each guess took to make
+    guess_times = []
     # Play the game on an infinite number of rows until the solution is found
     while True:
+        
+        start_time = time.time()
+        
         # Make a guess for this turn
         # The solution from the previous iteration describes the state of the board this state carries through between the guesses.
         # The solver makes use of that data to make an educated guess for the next row, repeating until its guess matches the answer,
@@ -441,6 +464,10 @@ def solve_by_playing(feedback_pegs_column_specific):
         # The SAT solver randomly picks a valid model, which represents an intelligent guess that correctly 
         # uses the information from previous guesses
         solution = T.solve()
+
+        # Record how long the guess took to make
+        guess_times.append(time.time() - start_time)
+
         number_of_solutions = count_solutions(T)
 
         if not quiet:
@@ -463,7 +490,8 @@ def solve_by_playing(feedback_pegs_column_specific):
         
         row += 1
 
-    return solution
+    # Rows are 0 indexed so the total number of guesses is one higher
+    return [solution, row+1, guess_times]
 
 # Play the game using unmodified mastermind rules, where there is no promise that the feedback pegs match a single column
 def guess_next_row_original_rules(current_row: int, model: Dict) -> Encoding:
@@ -674,27 +702,30 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
 if __name__ == "__main__":
 
     parse_args()
-
-    # Make the solution Silver, Green, Yellow, Orange
-    #set_answer("s", "g", "y", "o")
     
     # Generate a random solution for the game
     # Does not override answers provided in the command line arguments
     if answer is None:
         set_answer()
     
+    if output_file:
+        csv_writer.writerow(["Guesses", "Seconds to Solve", *[f"Col {col+1}" for col in range(cols)], "Seconds for guess"])
+
     for repetition in range(repetitions):
         start_time = time.time()
 
         # feedback_pegs_column_specific: True -> modified rules, False -> Standard rules
         try:
-            solution = solve_by_playing(feedback_pegs_column_specific=False)
+            solution, number_of_guesses, guess_times = solve_by_playing(feedback_pegs_column_specific=False)
         except (KeyboardInterrupt):
             print("\nSolver interrupted.\n")
             exit()
-
         
         time_to_solve = time.time() - start_time
+
+        if output_file:
+            first_guess_colors = [[color for color in colors if solution[board[0][col][color]]][0] for col in range(cols)]
+            csv_writer.writerow([number_of_guesses, time_to_solve, *first_guess_colors, *guess_times])
 
         # Create a human-readable representation of the time taken
         minutes = time_to_solve // 60
@@ -704,27 +735,7 @@ if __name__ == "__main__":
 
         print(f"Solved in {time_text}")
 
-        '''
-        T = solve_all_at_once()
-        # Don't compile until you're finished adding all your constraints!
-        T = T.compile()
-        # After compilation (and only after), you can check some of the properties
-        # of your model:
-        print("\nSatisfiable: %s" % T.satisfiable())
-        print("# Solutions: %d" % count_solutions(T))
-        solution = T.solve()
-        '''
         if solution:
             print("Solution:")
             # Print a clean grid of which propositions / colors were selected for each position on the board 
             print_model(solution, column_specific_feedback_pegs=False)
-        '''
-            print("\nVariable likelihoods: ")
-            for row in range(len(board)):
-                for col in range(cols):
-                    for p in board[row][col].values():
-                        # Ensure that you only send these functions NNF formulas
-                        # Literals are compiled to NNF here
-                        print(" %s: %.2f" % (p, likelihood(T, p)))
-        print()
-        '''
