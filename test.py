@@ -1,7 +1,8 @@
+#!/usr/bin/python3
 
 import os, sys
 
-from run import solve_by_playing, print_model, answer, set_answer
+from run import solve_by_playing, print_model, get_encoding_object, set_answer
 
 USAGE = '\n\tpython3 test.py [draft|final]\n'
 EXPECTED_VAR_MIN = 10
@@ -15,7 +16,7 @@ def test_theory():
     # This solver generates a new theory/encoding for every guess/row, so there is no single theory to make the assertions against
     # Feedback pegs being column specifc is rule we made to work around a computer resource limitation during initial exploration.
     # Setting `feedback_pegs_column_specific` to false is the regular mastermind rule.
-    solution = solve_by_playing(feedback_pegs_column_specific=False)
+    solution, guesses, guess_times = solve_by_playing(feedback_pegs_column_specific=False)
 
     if solution:
         print("Solution:")
@@ -23,15 +24,16 @@ def test_theory():
         print_model(solution, column_specific_feedback_pegs=False)
 
 
-    # A default board of 4 columns with 8 colors has a over 4 * 8 * (# of rows) propositions, and each one is used in multiple constraints simultaniously
+    T = get_encoding_object().compile()
 
-    #assert len(T.vars()) > EXPECTED_VAR_MIN, "Only %d variables -- your theory is likely not sophisticated enough for the course project." % len(T.vars())
-    #assert T.size() > EXPECTED_CONS_MIN, "Only %d operators in the formula -- your theory is likely not sophisticated enough for the course project." % T.size()
+    # A default board of 4 columns with 8 colors has a over 4 * 8 * (# of rows) propositions, and each one is used in multiple constraints simultaniously
+    assert len(T.vars()) > EXPECTED_VAR_MIN, "Only %d variables -- your theory is likely not sophisticated enough for the course project." % len(T.vars())
+    assert T.size() > EXPECTED_CONS_MIN, "Only %d operators in the formula -- your theory is likely not sophisticated enough for the course project." % T.size()
     
-    # These 2 checks are run for every guess, and an exception will be thrown if they fail 
+    # These 2 checks are also run for every guess in run.py, and an exception will be thrown if they fail 
     
-    #assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
-    #assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
+    assert not T.valid(), "Theory is valid (every assignment is a solution). Something is likely wrong with the constraints."
+    assert not T.negate().valid(), "Theory is inconsistent (no solutions exist). Something is likely wrong with the constraints."
 
 def file_checks(stage):
     proofs_jp = os.path.isfile(os.path.join('.','documents',stage,'proofs.jp'))

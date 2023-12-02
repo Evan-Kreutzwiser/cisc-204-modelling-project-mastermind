@@ -17,7 +17,6 @@ import csv
 
 from rich import print as rich_print
 from rich.panel import Panel
-from rich.columns import Columns
 from rich.text import Text
 from rich.table import Table
 
@@ -676,6 +675,10 @@ def guess_next_row(current_row: int, model: Dict) -> Encoding:
     
     return E
 
+# Allows the test file to extract the most recent version of the encoding, 
+# for validating complexity, size, and solvability
+def get_encoding_object():
+    return E
 
 if __name__ == "__main__":
 
