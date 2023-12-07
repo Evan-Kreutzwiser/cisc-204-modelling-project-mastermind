@@ -1,0 +1,25 @@
+Jape has a restriction on the letters which can be used in natural deduction proofs.
+
+only i, j, k, x, y, and z, can be used as variables and only A, B, C, D, E, F, G, H, P, Q, R, S, and T, can be used as formula
+
+Our folder 'natural_deduction_more_vars' lifts this restriction so that any lowercase letter can be a variable and any Uppercase letter can be a formula
+
+This allows our proofs to look nicer with different sets of variables being able to represent the values of the model 
+(for example: i, j, k are colors; a, b, c are columns; and x, y, z are used in predicates)
+It also allows our proofs to match with the propositions laid out at the top of our document by allowing the formula X to represent a guess peg.
+
+
+INSTRUCTIONS FOR USING 'natural_deduction_more_vars':
+1. download the folder 'natural_deduction_more_vars', in the /documents/final folder of our GitHub 
+	- it should be in the same folder as this instruction file
+2. Find the folder location where jape.exe is located
+	- for the memebers of this group jape was located in C:\Users\{your_user}\AppData\Local\Jape\Jape.app\
+3. Open the \examples folder and copy 'natural_deduction_more_vars' into that folder
+	- if \examples is sorted alphabetically 'natural_deduction_more_vars' should appear next to 'natural_deduction'
+4. Open Jape
+5. instead of clicking File > Open Recent > I2L.st, click File > Open... and make your way to the location of Jape, then to \examples then to \natural_deduction_more_vars and then open the file I2L.jt within \natural_deduction_more_vars
+	- 3 windows should open just like when the I2L.jt file from within 'natural_deduction' is opened
+7. you can now succesfully open our proofs.jp file found with our GitHub 
+	- it should be in the same folder as this instruction file
+
+Also our I2L.jt should now appear under File > Open Recent within Jape. Look for its file location to determine if it is the standard 'natural_deduction' folder or our custom 'natural_deduction_more_vars'
